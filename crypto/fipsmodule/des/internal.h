@@ -65,6 +65,10 @@
 extern "C" {
 #endif
 
+OPENSSL_INLINE int hwdes_capable(void) {
+
+       // call to the libica entrypoint
+}
 
 #define c2l(c, l)                         \
   do {                                    \

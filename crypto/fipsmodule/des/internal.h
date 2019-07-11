@@ -65,9 +65,17 @@
 extern "C" {
 #endif
 
-OPENSSL_INLINE int hwdes_capable(void) {
+#define HWAES
+#define HWAES_ECB
 
+OPENSSL_INLINE int hdes_capable(void) {
+  return 0;
 }
+
+#define VPAES
+#if defined(OPENSSL_X86_64)
+#define VPAES_CTR32
+#endif
 
 #define c2l(c, l)                         \
   do {                                    \

@@ -125,6 +125,13 @@ OPENSSL_INLINE void des_hw_ctr32_encrypt_blocks(const uint8_t *in, uint8_t *out,
   abort();
 }
 
+OPENSSL_INLINE void des_hw_ncbc_encrypt_blocks(unsigned int function_code,
+                                                unsigned long input_length,
+                                                const unsigned char *input_data,
+                                                unsigned char *keys,
+                                                unsigned char *output_data) 
+
+
 #endif  // !HWDES
  
 

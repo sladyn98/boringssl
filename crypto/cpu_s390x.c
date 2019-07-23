@@ -22,15 +22,13 @@ int is_s390x_capable(){
     
 }
 
-
-int xxx_yyy(char *x, int y, void *handle)
-{
-	static char *epName = "ica_xxx_yyy";
-	static int (*ica_xxx_yyy)(char *, int) = NULL;
+int ica_aes_cbc(char *x, int y, void *handle) {
+	static char *epName = "ica_aes_cbc";
+	static int (*ica_aes_cbc)(char *, int) = NULL;
 	
-	if (ica_xxx_yyy == NULL) {
-		ica_xxx_yyy = dlsym(handle, epName);
+	if (ica_aes_cbc == NULL) {
+		ica_aes_cbc = dlsym(handle, epName);
 	}
 	
-	return (*(ica_xxx_yyy)(x, y));
+	return (*(ica_aes_cbc)(x, y));
 }

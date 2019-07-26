@@ -22,13 +22,22 @@ int is_s390x_capable(){
     
 }
 
-int ica_aes_cbc(char *x, int y, void *handle) {
-	static char *epName = "ica_aes_cbc";
+
+int aes_hw_set_encrypt_key(const uint8_t *user_key, const int bits,
+                           AES_KEY *key) {
+
+
+    static char *epName = "ica_aes_cbc";
 	static int (*ica_aes_cbc)(char *, int) = NULL;
-	
-	if (ica_aes_cbc == NULL) {
+
+    aeskey->rounds = bits/8;
+    memcpy(aeskey->rd_key, bits/8, key);
+
+ 	if (ica_aes_cbc == NULL) {
+         //The handle needs to be passed to dlsym
 		ica_aes_cbc = dlsym(handle, epName);
 	}
-	
-	return (*(ica_aes_cbc)(x, y));
+
+ 	return (unsigned int) (*(ica_aes_cbc)(*in_data,*out_data,data_length,*aeskey-rd_key,key_length,*iv,direction));
+
 }

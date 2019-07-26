@@ -53,3 +53,27 @@ void aes_hw_cbc_encrypt(const uint8_t *in, uint8_t *out,
 	}
     ica_aes_cbc(in_data, out_data, data_length, aeskey->rd_key, key_length, ICA_ENCRYPT);
 }
+
+void aes_hw_encrypt(const uint8_t *in, uint8_t *out, const AES_KEY *key) {
+
+    static char *epName = "ica_aes_encrypt";
+	static int (*ica_aes_encrypt)(unsigned int,
+			     unsigned int,
+			     unsigned char *,
+			     ica_aes_vector_t *,
+			     unsigned int,
+			     unsigned char *,
+			     unsigned char *) = NULL;
+
+ 	if (ica_aes_encrypt == NULL) {
+        handle = dlopen("filename",RTLD_NOW);
+        if (!handle) {
+            fprintf(stderr, "%s\n", dlerror());
+            exit(EXIT_FAILURE);
+        }
+		ica_aes_encrypt = dlsym(handle, epName);
+	}
+
+    ica_aes_cbc(in_data, out_data, data_length, aeskey->rd_key, key_length, ICA_ENCRYPT);
+
+}

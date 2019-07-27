@@ -30,6 +30,14 @@ int aes_hw_set_encrypt_key(const uint8_t *user_key, const int bits,
  	return (1);
 }
 
+int aes_hw_set_decrypt_key(const uint8_t *user_key, const int bits,
+                           AES_KEY *key) {
+
+    aeskey->rounds = bits/8;
+    memcpy(aeskey->rd_key, bits/8, key);
+ 	return (1);
+}
+
 #define ICA_ENCRYPT 1
 #define ICA_DECRYPT 0
 
@@ -57,12 +65,8 @@ void aes_hw_cbc_encrypt(const uint8_t *in, uint8_t *out,
 void aes_hw_encrypt(const uint8_t *in, uint8_t *out, const AES_KEY *key) {
 
     static char *epName = "ica_aes_encrypt";
-	static int (*ica_aes_encrypt)(unsigned int,
-			     unsigned int,
-			     unsigned char *,
-			     ica_aes_vector_t *,
-			     unsigned int,
-			     unsigned char *,
+	static int (*ica_aes_encrypt)(unsigned int, unsigned int, unsigned char *,
+			     ica_aes_vector_t *, unsigned int, unsigned char *,
 			     unsigned char *) = NULL;
 
  	if (ica_aes_encrypt == NULL) {
@@ -74,6 +78,26 @@ void aes_hw_encrypt(const uint8_t *in, uint8_t *out, const AES_KEY *key) {
 		ica_aes_encrypt = dlsym(handle, epName);
 	}
 
-    ica_aes_cbc(in_data, out_data, data_length, aeskey->rd_key, key_length, ICA_ENCRYPT);
+    (void) ica_aes_cbc(in_data, out_data, data_length, aeskey->rd_key, key_length, ICA_ENCRYPT);
+
+}
+
+void aes_hw_decrypt(const uint8_t *in, uint8_t *out, const AES_KEY *key) {
+
+    static char *epName = "ica_aes_decrypt";
+	static int (*ica_aes_encrypt)(unsigned int, unsigned int, unsigned char *,
+			     ica_aes_vector_t *, unsigned int, unsigned char *,
+			     unsigned char *) = NULL;
+
+ 	if (ica_aes_encrypt == NULL) {
+        handle = dlopen("filename",RTLD_NOW);
+        if (!handle) {
+            fprintf(stderr, "%s\n", dlerror());
+            exit(EXIT_FAILURE);
+        }
+		ica_aes_encrypt = dlsym(handle, epName);
+	}
+
+    (void) ica_aes_cbc(in_data, out_data, data_length, aeskey->rd_key, key_length, ICA_DECRYPT);
 
 }

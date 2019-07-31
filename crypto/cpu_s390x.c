@@ -101,24 +101,23 @@ void aes_hw_decrypt(const uint8_t *in, uint8_t *out, const AES_KEY *key) {
     (void) ica_aes_cbc(in_data, out_data, data_length, aeskey->rd_key, key_length, ICA_DECRYPT);
 }
 
-void aes_hw_ctr32_encrypt_blocks(const uint8_t *in, uint8_t *out, size_t len,
-                                 const AES_KEY *key, const uint8_t ivec[16]) {
+// void aes_hw_ctr32_encrypt_blocks(const uint8_t *in, uint8_t *out, size_t len,
+//                                  const AES_KEY *key, const uint8_t ivec[16]) {
 
-    static char *epName = "ica_aes_ctr";
-	static int (*unsigned int ica_aes_ctr(const unsigned char *, unsigned char *,
-			 unsigned long, unsigned char *, unsigned int, unsigned char *, unsigned int,
-			 unsigned int); = NULL;
+//     static char *epName = "ica_aes_ctr";
+// 	static int (*unsigned int ica_aes_ctr(const unsigned char *, unsigned char *,
+// 			 unsigned long, unsigned char *, unsigned int, unsigned char *, unsigned int,
+// 			 unsigned int); = NULL;
 
- 	if (ica_aes_ctr == NULL) {
-        handle = dlopen("filename",RTLD_NOW);
-        if (!handle) {
-            fprintf(stderr, "%s\n", dlerror());
-            exit(EXIT_FAILURE);
-        }
-		ica_aes_ctr = dlsym(handle, epName);
-	}
+//  	if (ica_aes_ctr == NULL) {
+//         handle = dlopen("filename",RTLD_NOW);
+//         if (!handle) {
+//             fprintf(stderr, "%s\n", dlerror());
+//             exit(EXIT_FAILURE);
+//         }
+// 		ica_aes_ctr = dlsym(handle, epName);
+// 	}
 
-    (void) ica_aes_ctr(in_data, out_data,  data_length,aes->rd_key, key_length, *ctr, ctr_width,
-			 ICA_ENCRYPT);
+//     (void) ica_aes_ctr(in_data, out_data,  data_length,aes->rd_key, key_length, *ctr, 16,ICA_ENCRYPT);
 
-}
+// }

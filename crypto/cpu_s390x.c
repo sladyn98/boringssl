@@ -121,3 +121,24 @@ void aes_hw_decrypt(const uint8_t *in, uint8_t *out, const AES_KEY *key) {
 //     (void) ica_aes_ctr(in_data, out_data,  data_length,aes->rd_key, key_length, *ctr, 16,ICA_ENCRYPT);
 
 // }
+
+
+void des_hw_cbc_encrypt(const uint8_t *in, uint8_t *out, size_t length,
+                        const DES_KEY *key, uint8_t *ivec, const int enc){
+
+    static char *epName = "ica_des_decrypt";
+	static int (*ica_aes_encrypt)(const unsigned char *, unsigned char *,
+			 unsigned long, unsigned char *, unsigned char *, unsigned int) = NULL;
+
+ 	if (ica_des_encrypt == NULL) {
+        handle = dlopen("filename",RTLD_NOW);
+        if (!handle) {
+            fprintf(stderr, "%s\n", dlerror());
+            exit(EXIT_FAILURE);
+        }
+		ica_des_encrypt = dlsym(handle, epName);
+	}
+
+    (void) ica_des_cbc(in_data, out_data, data_length, deskey, key_length, ICA_ENCRYPT);
+}
+

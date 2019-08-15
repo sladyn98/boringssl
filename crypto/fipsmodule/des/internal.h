@@ -58,13 +58,82 @@
 #define OPENSSL_HEADER_DES_INTERNAL_H
 
 #include <openssl/base.h>
-
 #include "../../internal.h"
 
 #if defined(__cplusplus)
 extern "C" {
 #endif
 
+#if !defined(OPENSSL_NO_ASM)
+
+#if defined(OPENSSL_S390X)
+#define HWDES
+
+OPENSSL_INLINE int hwdes_capable(void) {
+  return is_s390x_capable();
+}
+
+
+#if defined(HWDES)
+
+int des_hw_set_encrypt_key(const uint8_t *user_key, const int bits,
+                           DES_KEY *key);
+int des_hw_set_decrypt_key(const uint8_t *user_key, const int bits,
+                           DES_KEY *key);
+void des_hw_encrypt(const uint8_t *in, uint8_t *out, const DES_KEY *key);
+void des_hw_decrypt(const uint8_t *in, uint8_t *out, const DES_KEY *key);
+void des_hw_cbc_encrypt(const uint8_t *in, uint8_t *out, size_t length,
+                        const DES_KEY *key, uint8_t *ivec, const int enc);
+void des_hw_ctr32_encrypt_blocks(const uint8_t *in, uint8_t *out, size_t len,
+                                 const DES_KEY *key, const uint8_t ivec[16]);
+
+#else
+
+// If HWDES isn't defined then we provide dummy functions for each of the hwdes
+// functions.
+OPENSSL_INLINE int hwdes_capable(void) { return 0; }
+
+OPENSSL_INLINE int des_hw_set_encrypt_key(const uint8_t *user_key, int bits,
+                                          DES_KEY *key) {
+  abort();
+}
+
+OPENSSL_INLINE int des_hw_set_decrypt_key(const uint8_t *user_key, int bits,
+                                          DES_KEY *key) {
+  abort();
+}
+
+OPENSSL_INLINE void des_hw_encrypt(const uint8_t *in, uint8_t *out,
+                                   const DES_KEY *key) {
+  abort();
+}
+
+OPENSSL_INLINE void des_hw_decrypt(const uint8_t *in, uint8_t *out,
+                                   const DES_KEY *key) {
+  abort();
+}
+
+OPENSSL_INLINE void des_hw_cbc_encrypt(const uint8_t *in, uint8_t *out,
+                                       size_t length, const DES_KEY *key,
+                                       uint8_t *ivec, int enc) {
+  abort();
+}
+
+OPENSSL_INLINE void des_hw_ctr32_encrypt_blocks(const uint8_t *in, uint8_t *out,
+                                                size_t len, const DES_KEY *key,
+                                                const uint8_t ivec[16]) {
+  abort();
+}
+
+OPENSSL_INLINE void des_hw_ncbc_encrypt_blocks(unsigned int function_code,
+                                                unsigned long input_length,
+                                                const unsigned char *input_data,
+                                                unsigned char *keys,
+                                                unsigned char *output_data) 
+
+
+#endif  // !HWDES
+ 
 
 #define c2l(c, l)                         \
   do {                                    \

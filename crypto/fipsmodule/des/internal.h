@@ -73,7 +73,8 @@ OPENSSL_INLINE int hwdes_capable(void) {
   return is_s390x_capable();
 }
 
-
+#endif
+#endif
 #if defined(HWDES)
 
 int des_hw_set_encrypt_key(const uint8_t *user_key, const int bits,

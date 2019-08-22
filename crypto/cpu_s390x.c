@@ -13,7 +13,7 @@ int is_s390x_capable(){
     void *handle;
     int  *iptr;
     int *pointerArray[100]; // To be used to store the addresses of the symbols.
-    handle = dlopen("filename",RTLD_NOW);
+    handle = dlopen("libica.so",RTLD_NOW);
      if (!handle) {
         fprintf(stderr, "%s\n", dlerror());
         exit(EXIT_FAILURE);
@@ -52,7 +52,7 @@ void aes_hw_cbc_encrypt(const uint8_t *in, uint8_t *out,
                          unsigned int) = NULL;
 
  	if (ica_aes_cbc == NULL) {
-        handle = dlopen("filename",RTLD_NOW);
+        handle = dlopen("libica.so",RTLD_NOW);
         if (!handle) {
             fprintf(stderr, "%s\n", dlerror());
             exit(EXIT_FAILURE);
@@ -70,7 +70,7 @@ void aes_hw_encrypt(const uint8_t *in, uint8_t *out, const AES_KEY *key) {
 			     unsigned char *) = NULL;
 
  	if (ica_aes_encrypt == NULL) {
-        handle = dlopen("filename",RTLD_NOW);
+        handle = dlopen("libica.so",RTLD_NOW);
         if (!handle) {
             fprintf(stderr, "%s\n", dlerror());
             exit(EXIT_FAILURE);
@@ -90,7 +90,7 @@ void aes_hw_decrypt(const uint8_t *in, uint8_t *out, const AES_KEY *key) {
 			     unsigned char *) = NULL;
 
  	if (ica_aes_encrypt == NULL) {
-        handle = dlopen("filename",RTLD_NOW);
+        handle = dlopen("libica.so",RTLD_NOW);
         if (!handle) {
             fprintf(stderr, "%s\n", dlerror());
             exit(EXIT_FAILURE);
@@ -131,7 +131,7 @@ void des_hw_cbc_encrypt(const uint8_t *in, uint8_t *out, size_t length,
 			 unsigned long, unsigned char *, unsigned char *, unsigned int) = NULL;
 
  	if (ica_des_encrypt == NULL) {
-        handle = dlopen("filename",RTLD_NOW);
+        handle = dlopen("libica.so",RTLD_NOW);
         if (!handle) {
             fprintf(stderr, "%s\n", dlerror());
             exit(EXIT_FAILURE);

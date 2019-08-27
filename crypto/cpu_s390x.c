@@ -142,3 +142,58 @@ void des_hw_cbc_encrypt(const uint8_t *in, uint8_t *out, size_t length,
     (void) ica_des_cbc(in_data, out_data, data_length, deskey, key_length, ICA_ENCRYPT);
 }
 
+
+void des_hw_decrypt(const uint8_t *in, uint8_t *out, const AES_KEY *key) {
+
+    static char *epName = "ica_des_decrypt";
+	static int (*ica_des_decrypt)(unsigned int, unsigned int,
+			     unsigned char, ica_des_vector_t *, ica_des_key_single_t *,
+			     unsigned char *) = NULL;
+
+ 	if (ica_des_decrypt == NULL) {
+        handle = dlopen("libica.so",RTLD_NOW);
+        if (!handle) {
+            fprintf(stderr, "%s\n", dlerror());
+            exit(EXIT_FAILURE);
+        }
+		ica_des_decrypt = dlsym(handle, epName);
+	}
+    (void) ica_des_decrypt(in_data, out_data, data_length, aeskey->rd_key, key_length, ICA_DECRYPT);
+}
+
+void des_hw_encrypt(const uint8_t *in, uint8_t *out, const AES_KEY *key) {
+
+    static char *epName = "ica_des_encrypt";
+	static int (*ica_des_encrypt)(unsigned int, unsigned int ,
+			     unsigned char, ica_des_vector_t *, ica_des_key_single_t *,
+			     unsigned char *) = NULL;
+
+ 	if (ica_des_encrypt == NULL) {
+        handle = dlopen("libica.so",RTLD_NOW);
+        if (!handle) {
+            fprintf(stderr, "%s\n", dlerror());
+            exit(EXIT_FAILURE);
+        }
+		ica_des_encrypt = dlsym(handle, epName);
+	}
+    (void) ica_des_decrypt(in_data, out_data, data_length, aeskey->rd_key, key_length, ICA_ENCRYPT);
+}
+
+int des_hw_set_encrypt_key(const uint8_t *user_key, const int bits,
+                           DES_KEY *key) {
+
+    deskey->rounds = bits/8;
+    memcpy(deskey->rd_key, bits/8, key);
+ 	return (1);
+}
+
+int des_hw_set_decrypt_key(const uint8_t *user_key, const int bits,
+                           DES_KEY *key) {
+
+    deskey->rounds = bits/8;
+    memcpy(deskey->rd_key, bits/8, key);
+ 	return (1);
+}
+
+
+

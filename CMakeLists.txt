@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.0)
 
 # Defer enabling C and CXX languages.
 project(BoringSSL NONE)
-
 if(WIN32)
   # On Windows, prefer cl over gcc if both are available. By default most of
   # the CMake generators prefer gcc, even on Windows.

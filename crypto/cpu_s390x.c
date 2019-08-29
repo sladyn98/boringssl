@@ -196,4 +196,24 @@ int des_hw_set_decrypt_key(const uint8_t *user_key, const int bits,
 }
 
 
+void sha256_block_data_order(uint32_t *state, const uint8_t *in,
+                             size_t num_blocks) {
+
+    static char *epName = "ica_sha256";
+	static int (*ica_sha256)(unsigned int,
+			unsigned int , unsigned char *, sha256_context_t *,
+			unsigned char *) = NULL;
+
+ 	if (ica_sha256 == NULL) {
+        handle = dlopen("libica.so",RTLD_NOW);
+        if (!handle) {
+            fprintf(stderr, "%s\n", dlerror());
+            exit(EXIT_FAILURE);
+        }
+		ica_sha256 = dlsym(handle, epName);
+	}
+    (void) ica_sha256(state, in->length,in->data, num_blocks,out->data );
+
+     }
+
 

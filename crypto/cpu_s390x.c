@@ -214,6 +214,24 @@ void sha256_block_data_order(uint32_t *state, const uint8_t *in,
 	}
     (void) ica_sha256(state, in->length,in->data, num_blocks,out->data );
 
-     }
+}
 
+void sha512_block_data_order(uint64_t *state, const uint8_t *in,
+                             size_t num_blocks) {
+
+    static char *epName = "ica_sha512";
+	static int (*ica_sha512)(unsigned int,
+			uint64_t ,unsigned char *, sha512_context_t *, unsigned char *) = NULL;
+
+ 	if (ica_sha512 == NULL) {
+        handle = dlopen("libica.so",RTLD_NOW);
+        if (!handle) {
+            fprintf(stderr, "%s\n", dlerror());
+            exit(EXIT_FAILURE);
+        }
+		ica_sha512 = dlsym(handle, epName);
+	}
+    (void) ica_sha512(state, in->length,in->data, num_blocks,out->data);
+
+}
 

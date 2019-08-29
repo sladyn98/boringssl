@@ -192,8 +192,7 @@ int des_hw_set_decrypt_key(const uint8_t *user_key, const int bits,
 }
 
 
-void sha256_block_data_order(uint32_t *state, const uint8_t *in,
-                             size_t num_blocks) {
+c {
 
     static char *epName = "ica_sha256";
 	static int (*ica_sha256)(unsigned int,

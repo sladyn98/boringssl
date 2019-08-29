@@ -6,9 +6,6 @@
 #include <stdlib.h>
 #include <dlfcn.h>
 
-
-
-
 int is_s390x_capable(){
     void *handle;
     int  *iptr;
@@ -18,7 +15,6 @@ int is_s390x_capable(){
         fprintf(stderr, "%s\n", dlerror());
         exit(EXIT_FAILURE);
     }
-    
 }
 
 
@@ -212,7 +208,7 @@ void sha256_block_data_order(uint32_t *state, const uint8_t *in,
         }
 		ica_sha256 = dlsym(handle, epName);
 	}
-    (void) ica_sha256(state, in->length,in->data, num_blocks,out->data );
+    (void) ica_sha256(data, len, in, ctx ,out);
 
 }
 
@@ -231,7 +227,6 @@ void sha512_block_data_order(uint64_t *state, const uint8_t *in,
         }
 		ica_sha512 = dlsym(handle, epName);
 	}
-    (void) ica_sha512(state, in->length,in->data, num_blocks,out->data);
-
+    (void) ica_sha512(data, len, in, ctx ,out);
 }
 

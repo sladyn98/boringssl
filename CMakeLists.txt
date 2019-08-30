@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.0)
 
 # Defer enabling C and CXX languages.
 project(BoringSSL NONE)
+
 if(WIN32)
   # On Windows, prefer cl over gcc if both are available. By default most of
   # the CMake generators prefer gcc, even on Windows.
@@ -467,7 +468,7 @@ elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "mips")
   set(ARCH "generic")
 elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "ppc64le")
   set(ARCH "ppc64le")
-elseif(${CMAKE SYSTEM_PROCESSOR} STREQUAL "s390x")
+elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "s390x")
   set(ARCH "s390x")
 else()
   message(FATAL_ERROR "Unknown processor:" ${CMAKE_SYSTEM_PROCESSOR})

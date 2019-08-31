@@ -52,745 +52,259 @@
  * The licence and distribution terms for any publically available version or
  * derivative of this code cannot be changed.  i.e. this code cannot simply be
  * copied and put under another distribution licence
- * [including the GNU Public Licence.]
- */
-/* ====================================================================
- * Copyright (c) 1998-2001 The OpenSSL Project.  All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *
- * 3. All advertising materials mentioning features or use of this
- *    software must display the following acknowledgment:
- *    "This product includes software developed by the OpenSSL Project
- *    for use in the OpenSSL Toolkit. (http://www.openssl.org/)"
- *
- * 4. The names "OpenSSL Toolkit" and "OpenSSL Project" must not be used to
- *    endorse or promote products derived from this software without
- *    prior written permission. For written permission, please contact
- *    openssl-core@openssl.org.
- *
- * 5. Products derived from this software may not be called "OpenSSL"
- *    nor may "OpenSSL" appear in their names without prior written
- *    permission of the OpenSSL Project.
- *
- * 6. Redistributions of any form whatsoever must retain the following
- *    acknowledgment:
- *    "This product includes software developed by the OpenSSL Project
- *    for use in the OpenSSL Toolkit (http://www.openssl.org/)"
- *
- * THIS SOFTWARE IS PROVIDED BY THE OpenSSL PROJECT ``AS IS'' AND ANY
- * EXPRESSED OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE OpenSSL PROJECT OR
- * ITS CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
- * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
- * OF THE POSSIBILITY OF SUCH DAMAGE.
- * ====================================================================
- *
- * This product includes cryptographic software written by Eric Young
- * (eay@cryptsoft.com).  This product includes software written by Tim
- * Hudson (tjh@cryptsoft.com). */
+ * [including the GNU Public Licence.] */
 
-#ifndef OPENSSL_HEADER_CRYPTO_INTERNAL_H
-#define OPENSSL_HEADER_CRYPTO_INTERNAL_H
+#ifndef OPENSSL_HEADER_DES_INTERNAL_H
+#define OPENSSL_HEADER_DES_INTERNAL_H
 
-#include <openssl/ex_data.h>
-#include <openssl/stack.h>
-#include <openssl/thread.h>
-
-#include <assert.h>
-#include <string.h>
-
-#if defined(BORINGSSL_CONSTANT_TIME_VALIDATION)
-#include <valgrind/memcheck.h>
-#endif
-
-#if !defined(__cplusplus)
-#if defined(_MSC_VER)
-#define alignas(x) __declspec(align(x))
-#define alignof __alignof
-#else
-#include <stdalign.h>
-#endif
-#endif
-
-#if defined(OPENSSL_THREADS) && \
-    (!defined(OPENSSL_WINDOWS) || defined(__MINGW32__))
-#include <pthread.h>
-#define OPENSSL_PTHREADS
-#endif
-
-#if defined(OPENSSL_THREADS) && !defined(OPENSSL_PTHREADS) && \
-    defined(OPENSSL_WINDOWS)
-#define OPENSSL_WINDOWS_THREADS
-OPENSSL_MSVC_PRAGMA(warning(push, 3))
-#include <windows.h>
-OPENSSL_MSVC_PRAGMA(warning(pop))
-#endif
+#include <openssl/base.h>
+#include "../../internal.h"
 
 #if defined(__cplusplus)
 extern "C" {
 #endif
 
+#if !defined(OPENSSL_NO_ASM)
 
-#if defined(OPENSSL_X86) || defined(OPENSSL_X86_64) || defined(OPENSSL_ARM) || \
-    defined(OPENSSL_AARCH64) || defined(OPENSSL_PPC64LE)
-// OPENSSL_cpuid_setup initializes the platform-specific feature cache.
-void OPENSSL_cpuid_setup(void);
-#endif
+#if defined(OPENSSL_S390X)
+#define HWDES
 
-#if (defined(OPENSSL_ARM) || defined(OPENSSL_AARCH64)) && \
-    !defined(OPENSSL_STATIC_ARMCAP)
-// OPENSSL_get_armcap_pointer_for_test returns a pointer to |OPENSSL_armcap_P|
-// for unit tests. Any modifications to the value must be made after
-// |CRYPTO_library_init| but before any other function call in BoringSSL.
-OPENSSL_EXPORT uint32_t *OPENSSL_get_armcap_pointer_for_test(void);
-#endif
+OPENSSL_INLINE int hwdes_capable(void) {
+  return is_s390x_capable();
+}
 
-
-#if (!defined(_MSC_VER) || defined(__clang__)) && defined(OPENSSL_64_BIT)
-#define BORINGSSL_HAS_UINT128
-typedef __int128_t int128_t;
-typedef __uint128_t uint128_t;
-
-// clang-cl supports __uint128_t but modulus and division don't work.
-// https://crbug.com/787617.
-#if !defined(_MSC_VER) || !defined(__clang__)
-#define BORINGSSL_CAN_DIVIDE_UINT128
 #endif
 #endif
+#if defined(HWDES)
 
-#define OPENSSL_ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
-
-// Have a generic fall-through for different versions of C/C++.
-#if defined(__cplusplus) && __cplusplus >= 201703L
-#define OPENSSL_FALLTHROUGH [[fallthrough]]
-#elif defined(__cplusplus) && __cplusplus >= 201103L && defined(__clang__)
-#define OPENSSL_FALLTHROUGH [[clang::fallthrough]]
-#elif defined(__cplusplus) && __cplusplus >= 201103L && defined(__GNUC__) && \
-    __GNUC__ >= 7
-#define OPENSSL_FALLTHROUGH [[gnu::fallthrough]]
-#elif defined(__GNUC__) && __GNUC__ >= 7 // gcc 7
-#define OPENSSL_FALLTHROUGH __attribute__ ((fallthrough))
-#else // C++11 on gcc 6, and all other cases
-#define OPENSSL_FALLTHROUGH
-#endif
-
-// buffers_alias returns one if |a| and |b| alias and zero otherwise.
-static inline int buffers_alias(const uint8_t *a, size_t a_len,
-                                const uint8_t *b, size_t b_len) {
-  // Cast |a| and |b| to integers. In C, pointer comparisons between unrelated
-  // objects are undefined whereas pointer to integer conversions are merely
-  // implementation-defined. We assume the implementation defined it in a sane
-  // way.
-  uintptr_t a_u = (uintptr_t)a;
-  uintptr_t b_u = (uintptr_t)b;
-  return a_u + a_len > b_u && b_u + b_len > a_u;
-}
-
-
-// Constant-time utility functions.
-//
-// The following methods return a bitmask of all ones (0xff...f) for true and 0
-// for false. This is useful for choosing a value based on the result of a
-// conditional in constant time. For example,
-//
-// if (a < b) {
-//   c = a;
-// } else {
-//   c = b;
-// }
-//
-// can be written as
-//
-// crypto_word_t lt = constant_time_lt_w(a, b);
-// c = constant_time_select_w(lt, a, b);
-
-// crypto_word_t is the type that most constant-time functions use. Ideally we
-// would like it to be |size_t|, but NaCl builds in 64-bit mode with 32-bit
-// pointers, which means that |size_t| can be 32 bits when |BN_ULONG| is 64
-// bits. Since we want to be able to do constant-time operations on a
-// |BN_ULONG|, |crypto_word_t| is defined as an unsigned value with the native
-// word length.
-#if defined(OPENSSL_64_BIT)
-typedef uint64_t crypto_word_t;
-#elif defined(OPENSSL_32_BIT)
-typedef uint32_t crypto_word_t;
-#else
-#error "Must define either OPENSSL_32_BIT or OPENSSL_64_BIT"
-#endif
-
-#define CONSTTIME_TRUE_W ~((crypto_word_t)0)
-#define CONSTTIME_FALSE_W ((crypto_word_t)0)
-#define CONSTTIME_TRUE_8 ((uint8_t)0xff)
-#define CONSTTIME_FALSE_8 ((uint8_t)0)
-
-// value_barrier_w returns |a|, but prevents GCC and Clang from reasoning about
-// the returned value. This is used to mitigate compilers undoing constant-time
-// code, until we can express our requirements directly in the language.
-//
-// Note the compiler is aware that |value_barrier_w| has no side effects and
-// always has the same output for a given input. This allows it to eliminate
-// dead code, move computations across loops, and vectorize.
-static inline crypto_word_t value_barrier_w(crypto_word_t a) {
-#if !defined(OPENSSL_NO_ASM) && (defined(__GNUC__) || defined(__clang__))
-  __asm__("" : "+r"(a) : /* no inputs */);
-#endif
-  return a;
-}
-
-// value_barrier_u32 behaves like |value_barrier_w| but takes a |uint32_t|.
-static inline uint32_t value_barrier_u32(uint32_t a) {
-#if !defined(OPENSSL_NO_ASM) && (defined(__GNUC__) || defined(__clang__))
-  __asm__("" : "+r"(a) : /* no inputs */);
-#endif
-  return a;
-}
-
-// value_barrier_u64 behaves like |value_barrier_w| but takes a |uint64_t|.
-static inline uint64_t value_barrier_u64(uint64_t a) {
-#if !defined(OPENSSL_NO_ASM) && (defined(__GNUC__) || defined(__clang__))
-  __asm__("" : "+r"(a) : /* no inputs */);
-#endif
-  return a;
-}
-
-// constant_time_msb_w returns the given value with the MSB copied to all the
-// other bits.
-static inline crypto_word_t constant_time_msb_w(crypto_word_t a) {
-  return 0u - (a >> (sizeof(a) * 8 - 1));
-}
-
-// constant_time_lt_w returns 0xff..f if a < b and 0 otherwise.
-static inline crypto_word_t constant_time_lt_w(crypto_word_t a,
-                                               crypto_word_t b) {
-  // Consider the two cases of the problem:
-  //   msb(a) == msb(b): a < b iff the MSB of a - b is set.
-  //   msb(a) != msb(b): a < b iff the MSB of b is set.
-  //
-  // If msb(a) == msb(b) then the following evaluates as:
-  //   msb(a^((a^b)|((a-b)^a))) ==
-  //   msb(a^((a-b) ^ a))       ==   (because msb(a^b) == 0)
-  //   msb(a^a^(a-b))           ==   (rearranging)
-  //   msb(a-b)                      (because ∀x. x^x == 0)
-  //
-  // Else, if msb(a) != msb(b) then the following evaluates as:
-  //   msb(a^((a^b)|((a-b)^a))) ==
-  //   msb(a^(𝟙 | ((a-b)^a)))   ==   (because msb(a^b) == 1 and 𝟙
-  //                                  represents a value s.t. msb(𝟙) = 1)
-  //   msb(a^𝟙)                 ==   (because ORing with 1 results in 1)
-  //   msb(b)
-  //
-  //
-  // Here is an SMT-LIB verification of this formula:
-  //
-  // (define-fun lt ((a (_ BitVec 32)) (b (_ BitVec 32))) (_ BitVec 32)
-  //   (bvxor a (bvor (bvxor a b) (bvxor (bvsub a b) a)))
-  // )
-  //
-  // (declare-fun a () (_ BitVec 32))
-  // (declare-fun b () (_ BitVec 32))
-  //
-  // (assert (not (= (= #x00000001 (bvlshr (lt a b) #x0000001f)) (bvult a b))))
-  // (check-sat)
-  // (get-model)
-  return constant_time_msb_w(a^((a^b)|((a-b)^a)));
-}
-
-// constant_time_lt_8 acts like |constant_time_lt_w| but returns an 8-bit
-// mask.
-static inline uint8_t constant_time_lt_8(crypto_word_t a, crypto_word_t b) {
-  return (uint8_t)(constant_time_lt_w(a, b));
-}
-
-// constant_time_ge_w returns 0xff..f if a >= b and 0 otherwise.
-static inline crypto_word_t constant_time_ge_w(crypto_word_t a,
-                                               crypto_word_t b) {
-  return ~constant_time_lt_w(a, b);
-}
-
-// constant_time_ge_8 acts like |constant_time_ge_w| but returns an 8-bit
-// mask.
-static inline uint8_t constant_time_ge_8(crypto_word_t a, crypto_word_t b) {
-  return (uint8_t)(constant_time_ge_w(a, b));
-}
-
-// constant_time_is_zero returns 0xff..f if a == 0 and 0 otherwise.
-static inline crypto_word_t constant_time_is_zero_w(crypto_word_t a) {
-  // Here is an SMT-LIB verification of this formula:
-  //
-  // (define-fun is_zero ((a (_ BitVec 32))) (_ BitVec 32)
-  //   (bvand (bvnot a) (bvsub a #x00000001))
-  // )
-  //
-  // (declare-fun a () (_ BitVec 32))
-  //
-  // (assert (not (= (= #x00000001 (bvlshr (is_zero a) #x0000001f)) (= a #x00000000))))
-  // (check-sat)
-  // (get-model)
-  return constant_time_msb_w(~a & (a - 1));
-}
-
-// constant_time_is_zero_8 acts like |constant_time_is_zero_w| but returns an
-// 8-bit mask.
-static inline uint8_t constant_time_is_zero_8(crypto_word_t a) {
-  return (uint8_t)(constant_time_is_zero_w(a));
-}
-
-// constant_time_eq_w returns 0xff..f if a == b and 0 otherwise.
-static inline crypto_word_t constant_time_eq_w(crypto_word_t a,
-                                               crypto_word_t b) {
-  return constant_time_is_zero_w(a ^ b);
-}
-
-// constant_time_eq_8 acts like |constant_time_eq_w| but returns an 8-bit
-// mask.
-static inline uint8_t constant_time_eq_8(crypto_word_t a, crypto_word_t b) {
-  return (uint8_t)(constant_time_eq_w(a, b));
-}
-
-// constant_time_eq_int acts like |constant_time_eq_w| but works on int
-// values.
-static inline crypto_word_t constant_time_eq_int(int a, int b) {
-  return constant_time_eq_w((crypto_word_t)(a), (crypto_word_t)(b));
-}
-
-// constant_time_eq_int_8 acts like |constant_time_eq_int| but returns an 8-bit
-// mask.
-static inline uint8_t constant_time_eq_int_8(int a, int b) {
-  return constant_time_eq_8((crypto_word_t)(a), (crypto_word_t)(b));
-}
-
-// constant_time_select_w returns (mask & a) | (~mask & b). When |mask| is all
-// 1s or all 0s (as returned by the methods above), the select methods return
-// either |a| (if |mask| is nonzero) or |b| (if |mask| is zero).
-static inline crypto_word_t constant_time_select_w(crypto_word_t mask,
-                                                   crypto_word_t a,
-                                                   crypto_word_t b) {
-  // Clang recognizes this pattern as a select. While it usually transforms it
-  // to a cmov, it sometimes further transforms it into a branch, which we do
-  // not want.
-  //
-  // Adding barriers to both |mask| and |~mask| breaks the relationship between
-  // the two, which makes the compiler stick with bitmasks.
-  return (value_barrier_w(mask) & a) | (value_barrier_w(~mask) & b);
-}
-
-// constant_time_select_8 acts like |constant_time_select| but operates on
-// 8-bit values.
-static inline uint8_t constant_time_select_8(uint8_t mask, uint8_t a,
-                                             uint8_t b) {
-  return (uint8_t)(constant_time_select_w(mask, a, b));
-}
-
-// constant_time_select_int acts like |constant_time_select| but operates on
-// ints.
-static inline int constant_time_select_int(crypto_word_t mask, int a, int b) {
-  return (int)(constant_time_select_w(mask, (crypto_word_t)(a),
-                                      (crypto_word_t)(b)));
-}
-
-#if defined(BORINGSSL_CONSTANT_TIME_VALIDATION)
-
-// CONSTTIME_SECRET takes a pointer and a number of bytes and marks that region
-// of memory as secret. Secret data is tracked as it flows to registers and
-// other parts of a memory. If secret data is used as a condition for a branch,
-// or as a memory index, it will trigger warnings in valgrind.
-#define CONSTTIME_SECRET(x, y) VALGRIND_MAKE_MEM_UNDEFINED(x, y)
-
-// CONSTTIME_DECLASSIFY takes a pointer and a number of bytes and marks that
-// region of memory as public. Public data is not subject to constant-time
-// rules.
-#define CONSTTIME_DECLASSIFY(x, y) VALGRIND_MAKE_MEM_DEFINED(x, y)
+int des_hw_set_encrypt_key(const uint8_t *user_key, const int bits,
+                           DES_KEY *key);
+int des_hw_set_decrypt_key(const uint8_t *user_key, const int bits,
+                           DES_KEY *key);
+void des_hw_encrypt(const uint8_t *in, uint8_t *out, const DES_KEY *key);
+void des_hw_decrypt(const uint8_t *in, uint8_t *out, const DES_KEY *key);
+void des_hw_cbc_encrypt(const uint8_t *in, uint8_t *out, size_t length,
+                        const DES_KEY *key, uint8_t *ivec, const int enc);
+void des_hw_ctr32_encrypt_blocks(const uint8_t *in, uint8_t *out, size_t len,
+                                 const DES_KEY *key, const uint8_t ivec[16]);
 
 #else
 
-#define CONSTTIME_SECRET(x, y)
-#define CONSTTIME_DECLASSIFY(x, y)
+// If HWDES isn't defined then we provide dummy functions for each of the hwdes
+// functions.
+OPENSSL_INLINE int hwdes_capable(void) { return 0; }
 
-#endif  // BORINGSSL_CONSTANT_TIME_VALIDATION
-
-
-// Thread-safe initialisation.
-
-#if !defined(OPENSSL_THREADS)
-typedef uint32_t CRYPTO_once_t;
-#define CRYPTO_ONCE_INIT 0
-#elif defined(OPENSSL_WINDOWS_THREADS)
-typedef INIT_ONCE CRYPTO_once_t;
-#define CRYPTO_ONCE_INIT INIT_ONCE_STATIC_INIT
-#elif defined(OPENSSL_PTHREADS)
-typedef pthread_once_t CRYPTO_once_t;
-#define CRYPTO_ONCE_INIT PTHREAD_ONCE_INIT
-#else
-#error "Unknown threading library"
-#endif
-
-// CRYPTO_once calls |init| exactly once per process. This is thread-safe: if
-// concurrent threads call |CRYPTO_once| with the same |CRYPTO_once_t| argument
-// then they will block until |init| completes, but |init| will have only been
-// called once.
-//
-// The |once| argument must be a |CRYPTO_once_t| that has been initialised with
-// the value |CRYPTO_ONCE_INIT|.
-OPENSSL_EXPORT void CRYPTO_once(CRYPTO_once_t *once, void (*init)(void));
-
-
-// Reference counting.
-
-// CRYPTO_REFCOUNT_MAX is the value at which the reference count saturates.
-#define CRYPTO_REFCOUNT_MAX 0xffffffff
-
-// CRYPTO_refcount_inc atomically increments the value at |*count| unless the
-// value would overflow. It's safe for multiple threads to concurrently call
-// this or |CRYPTO_refcount_dec_and_test_zero| on the same
-// |CRYPTO_refcount_t|.
-OPENSSL_EXPORT void CRYPTO_refcount_inc(CRYPTO_refcount_t *count);
-
-// CRYPTO_refcount_dec_and_test_zero tests the value at |*count|:
-//   if it's zero, it crashes the address space.
-//   if it's the maximum value, it returns zero.
-//   otherwise, it atomically decrements it and returns one iff the resulting
-//       value is zero.
-//
-// It's safe for multiple threads to concurrently call this or
-// |CRYPTO_refcount_inc| on the same |CRYPTO_refcount_t|.
-OPENSSL_EXPORT int CRYPTO_refcount_dec_and_test_zero(CRYPTO_refcount_t *count);
-
-
-// Locks.
-//
-// Two types of locks are defined: |CRYPTO_MUTEX|, which can be used in
-// structures as normal, and |struct CRYPTO_STATIC_MUTEX|, which can be used as
-// a global lock. A global lock must be initialised to the value
-// |CRYPTO_STATIC_MUTEX_INIT|.
-//
-// |CRYPTO_MUTEX| can appear in public structures and so is defined in
-// thread.h as a structure large enough to fit the real type. The global lock is
-// a different type so it may be initialized with platform initializer macros.
-
-#if !defined(OPENSSL_THREADS)
-struct CRYPTO_STATIC_MUTEX {
-  char padding;  // Empty structs have different sizes in C and C++.
-};
-#define CRYPTO_STATIC_MUTEX_INIT { 0 }
-#elif defined(OPENSSL_WINDOWS_THREADS)
-struct CRYPTO_STATIC_MUTEX {
-  SRWLOCK lock;
-};
-#define CRYPTO_STATIC_MUTEX_INIT { SRWLOCK_INIT }
-#elif defined(OPENSSL_PTHREADS)
-struct CRYPTO_STATIC_MUTEX {
-  pthread_rwlock_t lock;
-};
-#define CRYPTO_STATIC_MUTEX_INIT { PTHREAD_RWLOCK_INITIALIZER }
-#else
-#error "Unknown threading library"
-#endif
-
-// CRYPTO_MUTEX_init initialises |lock|. If |lock| is a static variable, use a
-// |CRYPTO_STATIC_MUTEX|.
-OPENSSL_EXPORT void CRYPTO_MUTEX_init(CRYPTO_MUTEX *lock);
-
-// CRYPTO_MUTEX_lock_read locks |lock| such that other threads may also have a
-// read lock, but none may have a write lock.
-OPENSSL_EXPORT void CRYPTO_MUTEX_lock_read(CRYPTO_MUTEX *lock);
-
-// CRYPTO_MUTEX_lock_write locks |lock| such that no other thread has any type
-// of lock on it.
-OPENSSL_EXPORT void CRYPTO_MUTEX_lock_write(CRYPTO_MUTEX *lock);
-
-// CRYPTO_MUTEX_unlock_read unlocks |lock| for reading.
-OPENSSL_EXPORT void CRYPTO_MUTEX_unlock_read(CRYPTO_MUTEX *lock);
-
-// CRYPTO_MUTEX_unlock_write unlocks |lock| for writing.
-OPENSSL_EXPORT void CRYPTO_MUTEX_unlock_write(CRYPTO_MUTEX *lock);
-
-// CRYPTO_MUTEX_cleanup releases all resources held by |lock|.
-OPENSSL_EXPORT void CRYPTO_MUTEX_cleanup(CRYPTO_MUTEX *lock);
-
-// CRYPTO_STATIC_MUTEX_lock_read locks |lock| such that other threads may also
-// have a read lock, but none may have a write lock. The |lock| variable does
-// not need to be initialised by any function, but must have been statically
-// initialised with |CRYPTO_STATIC_MUTEX_INIT|.
-OPENSSL_EXPORT void CRYPTO_STATIC_MUTEX_lock_read(
-    struct CRYPTO_STATIC_MUTEX *lock);
-
-// CRYPTO_STATIC_MUTEX_lock_write locks |lock| such that no other thread has
-// any type of lock on it.  The |lock| variable does not need to be initialised
-// by any function, but must have been statically initialised with
-// |CRYPTO_STATIC_MUTEX_INIT|.
-OPENSSL_EXPORT void CRYPTO_STATIC_MUTEX_lock_write(
-    struct CRYPTO_STATIC_MUTEX *lock);
-
-// CRYPTO_STATIC_MUTEX_unlock_read unlocks |lock| for reading.
-OPENSSL_EXPORT void CRYPTO_STATIC_MUTEX_unlock_read(
-    struct CRYPTO_STATIC_MUTEX *lock);
-
-// CRYPTO_STATIC_MUTEX_unlock_write unlocks |lock| for writing.
-OPENSSL_EXPORT void CRYPTO_STATIC_MUTEX_unlock_write(
-    struct CRYPTO_STATIC_MUTEX *lock);
-
-#if defined(__cplusplus)
-extern "C++" {
-
-BSSL_NAMESPACE_BEGIN
-
-namespace internal {
-
-// MutexLockBase is a RAII helper for CRYPTO_MUTEX locking.
-template <void (*LockFunc)(CRYPTO_MUTEX *), void (*ReleaseFunc)(CRYPTO_MUTEX *)>
-class MutexLockBase {
- public:
-  explicit MutexLockBase(CRYPTO_MUTEX *mu) : mu_(mu) {
-    assert(mu_ != nullptr);
-    LockFunc(mu_);
-  }
-  ~MutexLockBase() { ReleaseFunc(mu_); }
-  MutexLockBase(const MutexLockBase<LockFunc, ReleaseFunc> &) = delete;
-  MutexLockBase &operator=(const MutexLockBase<LockFunc, ReleaseFunc> &) =
-      delete;
-
- private:
-  CRYPTO_MUTEX *const mu_;
-};
-
-}  // namespace internal
-
-using MutexWriteLock =
-    internal::MutexLockBase<CRYPTO_MUTEX_lock_write, CRYPTO_MUTEX_unlock_write>;
-using MutexReadLock =
-    internal::MutexLockBase<CRYPTO_MUTEX_lock_read, CRYPTO_MUTEX_unlock_read>;
-
-BSSL_NAMESPACE_END
-
-}  // extern "C++"
-#endif  // defined(__cplusplus)
-
-
-// Thread local storage.
-
-// thread_local_data_t enumerates the types of thread-local data that can be
-// stored.
-typedef enum {
-  OPENSSL_THREAD_LOCAL_ERR = 0,
-  OPENSSL_THREAD_LOCAL_RAND,
-  OPENSSL_THREAD_LOCAL_TEST,
-  NUM_OPENSSL_THREAD_LOCALS,
-} thread_local_data_t;
-
-// thread_local_destructor_t is the type of a destructor function that will be
-// called when a thread exits and its thread-local storage needs to be freed.
-typedef void (*thread_local_destructor_t)(void *);
-
-// CRYPTO_get_thread_local gets the pointer value that is stored for the
-// current thread for the given index, or NULL if none has been set.
-OPENSSL_EXPORT void *CRYPTO_get_thread_local(thread_local_data_t value);
-
-// CRYPTO_set_thread_local sets a pointer value for the current thread at the
-// given index. This function should only be called once per thread for a given
-// |index|: rather than update the pointer value itself, update the data that
-// is pointed to.
-//
-// The destructor function will be called when a thread exits to free this
-// thread-local data. All calls to |CRYPTO_set_thread_local| with the same
-// |index| should have the same |destructor| argument. The destructor may be
-// called with a NULL argument if a thread that never set a thread-local
-// pointer for |index|, exits. The destructor may be called concurrently with
-// different arguments.
-//
-// This function returns one on success or zero on error. If it returns zero
-// then |destructor| has been called with |value| already.
-OPENSSL_EXPORT int CRYPTO_set_thread_local(
-    thread_local_data_t index, void *value,
-    thread_local_destructor_t destructor);
-
-
-// ex_data
-
-typedef struct crypto_ex_data_func_st CRYPTO_EX_DATA_FUNCS;
-
-DECLARE_STACK_OF(CRYPTO_EX_DATA_FUNCS)
-
-// CRYPTO_EX_DATA_CLASS tracks the ex_indices registered for a type which
-// supports ex_data. It should defined as a static global within the module
-// which defines that type.
-typedef struct {
-  struct CRYPTO_STATIC_MUTEX lock;
-  STACK_OF(CRYPTO_EX_DATA_FUNCS) *meth;
-  // num_reserved is one if the ex_data index zero is reserved for legacy
-  // |TYPE_get_app_data| functions.
-  uint8_t num_reserved;
-} CRYPTO_EX_DATA_CLASS;
-
-#define CRYPTO_EX_DATA_CLASS_INIT {CRYPTO_STATIC_MUTEX_INIT, NULL, 0}
-#define CRYPTO_EX_DATA_CLASS_INIT_WITH_APP_DATA \
-    {CRYPTO_STATIC_MUTEX_INIT, NULL, 1}
-
-// CRYPTO_get_ex_new_index allocates a new index for |ex_data_class| and writes
-// it to |*out_index|. Each class of object should provide a wrapper function
-// that uses the correct |CRYPTO_EX_DATA_CLASS|. It returns one on success and
-// zero otherwise.
-OPENSSL_EXPORT int CRYPTO_get_ex_new_index(CRYPTO_EX_DATA_CLASS *ex_data_class,
-                                           int *out_index, long argl,
-                                           void *argp,
-                                           CRYPTO_EX_free *free_func);
-
-// CRYPTO_set_ex_data sets an extra data pointer on a given object. Each class
-// of object should provide a wrapper function.
-OPENSSL_EXPORT int CRYPTO_set_ex_data(CRYPTO_EX_DATA *ad, int index, void *val);
-
-// CRYPTO_get_ex_data returns an extra data pointer for a given object, or NULL
-// if no such index exists. Each class of object should provide a wrapper
-// function.
-OPENSSL_EXPORT void *CRYPTO_get_ex_data(const CRYPTO_EX_DATA *ad, int index);
-
-// CRYPTO_new_ex_data initialises a newly allocated |CRYPTO_EX_DATA|.
-OPENSSL_EXPORT void CRYPTO_new_ex_data(CRYPTO_EX_DATA *ad);
-
-// CRYPTO_free_ex_data frees |ad|, which is embedded inside |obj|, which is an
-// object of the given class.
-OPENSSL_EXPORT void CRYPTO_free_ex_data(CRYPTO_EX_DATA_CLASS *ex_data_class,
-                                        void *obj, CRYPTO_EX_DATA *ad);
-
-
-// Endianness conversions.
-
-#if defined(__GNUC__) && __GNUC__ >= 2
-static inline uint32_t CRYPTO_bswap4(uint32_t x) {
-  return __builtin_bswap32(x);
+OPENSSL_INLINE int des_hw_set_encrypt_key(const uint8_t *user_key, int bits,
+                                          DES_KEY *key) {
+  abort();
 }
 
-static inline uint64_t CRYPTO_bswap8(uint64_t x) {
-  return __builtin_bswap64(x);
-}
-#elif defined(_MSC_VER)
-OPENSSL_MSVC_PRAGMA(warning(push, 3))
-#include <stdlib.h>
-OPENSSL_MSVC_PRAGMA(warning(pop))
-#pragma intrinsic(_byteswap_uint64, _byteswap_ulong)
-static inline uint32_t CRYPTO_bswap4(uint32_t x) {
-  return _byteswap_ulong(x);
+OPENSSL_INLINE int des_hw_set_decrypt_key(const uint8_t *user_key, int bits,
+                                          DES_KEY *key) {
+  abort();
 }
 
-static inline uint64_t CRYPTO_bswap8(uint64_t x) {
-  return _byteswap_uint64(x);
-}
-#else
-static inline uint32_t CRYPTO_bswap4(uint32_t x) {
-  x = (x >> 16) | (x << 16);
-  x = ((x & 0xff00ff00) >> 8) | ((x & 0x00ff00ff) << 8);
-  return x;
+OPENSSL_INLINE void des_hw_encrypt(const uint8_t *in, uint8_t *out,
+                                   const DES_KEY *key) {
+  abort();
 }
 
-static inline uint64_t CRYPTO_bswap8(uint64_t x) {
-  return CRYPTO_bswap4(x >> 32) | (((uint64_t)CRYPTO_bswap4(x)) << 32);
-}
-#endif
-
-
-// Language bug workarounds.
-//
-// Most C standard library functions are undefined if passed NULL, even when the
-// corresponding length is zero. This gives them (and, in turn, all functions
-// which call them) surprising behavior on empty arrays. Some compilers will
-// miscompile code due to this rule. See also
-// https://www.imperialviolet.org/2016/06/26/nonnull.html
-//
-// These wrapper functions behave the same as the corresponding C standard
-// functions, but behave as expected when passed NULL if the length is zero.
-//
-// Note |OPENSSL_memcmp| is a different function from |CRYPTO_memcmp|.
-
-// C++ defines |memchr| as a const-correct overload.
-#if defined(__cplusplus)
-extern "C++" {
-
-static inline const void *OPENSSL_memchr(const void *s, int c, size_t n) {
-  if (n == 0) {
-    return NULL;
-  }
-
-  return memchr(s, c, n);
+OPENSSL_INLINE void des_hw_decrypt(const uint8_t *in, uint8_t *out,
+                                   const DES_KEY *key) {
+  abort();
 }
 
-static inline void *OPENSSL_memchr(void *s, int c, size_t n) {
-  if (n == 0) {
-    return NULL;
-  }
-
-  return memchr(s, c, n);
+OPENSSL_INLINE void des_hw_cbc_encrypt(const uint8_t *in, uint8_t *out,
+                                       size_t length, const DES_KEY *key,
+                                       uint8_t *ivec, int enc) {
+  abort();
 }
 
-}  // extern "C++"
-#else  // __cplusplus
-
-static inline void *OPENSSL_memchr(const void *s, int c, size_t n) {
-  if (n == 0) {
-    return NULL;
-  }
-
-  return memchr(s, c, n);
+OPENSSL_INLINE void des_hw_ctr32_encrypt_blocks(const uint8_t *in, uint8_t *out,
+                                                size_t len, const DES_KEY *key,
+                                                const uint8_t ivec[16]) {
+  abort();
 }
 
-#endif  // __cplusplus
+OPENSSL_INLINE void des_hw_ncbc_encrypt_blocks(unsigned int function_code,
+                                                unsigned long input_length,
+                                                const unsigned char *input_data,
+                                                unsigned char *keys,
+                                                unsigned char *output_data) 
 
-static inline int OPENSSL_memcmp(const void *s1, const void *s2, size_t n) {
-  if (n == 0) {
-    return 0;
-  }
 
-  return memcmp(s1, s2, n);
-}
+#endif  // !HWDES
+ 
 
-static inline void *OPENSSL_memcpy(void *dst, const void *src, size_t n) {
-  if (n == 0) {
-    return dst;
-  }
+#define c2l(c, l)                         \
+  do {                                    \
+    (l) = ((uint32_t)(*((c)++)));         \
+    (l) |= ((uint32_t)(*((c)++))) << 8L;  \
+    (l) |= ((uint32_t)(*((c)++))) << 16L; \
+    (l) |= ((uint32_t)(*((c)++))) << 24L; \
+  } while (0)
 
-  return memcpy(dst, src, n);
-}
+#define l2c(l, c)                                    \
+  do {                                               \
+    *((c)++) = (unsigned char)(((l)) & 0xff);        \
+    *((c)++) = (unsigned char)(((l) >> 8L) & 0xff);  \
+    *((c)++) = (unsigned char)(((l) >> 16L) & 0xff); \
+    *((c)++) = (unsigned char)(((l) >> 24L) & 0xff); \
+  } while (0)
 
-static inline void *OPENSSL_memmove(void *dst, const void *src, size_t n) {
-  if (n == 0) {
-    return dst;
-  }
+// NOTE - c is not incremented as per c2l
+#define c2ln(c, l1, l2, n)                     \
+  do {                                         \
+    (c) += (n);                                \
+    (l1) = (l2) = 0;                           \
+    switch (n) {                               \
+      case 8:                                  \
+        (l2) = ((uint32_t)(*(--(c)))) << 24L;  \
+        OPENSSL_FALLTHROUGH;                   \
+      case 7:                                  \
+        (l2) |= ((uint32_t)(*(--(c)))) << 16L; \
+        OPENSSL_FALLTHROUGH;                   \
+      case 6:                                  \
+        (l2) |= ((uint32_t)(*(--(c)))) << 8L;  \
+        OPENSSL_FALLTHROUGH;                   \
+      case 5:                                  \
+        (l2) |= ((uint32_t)(*(--(c))));        \
+        OPENSSL_FALLTHROUGH;                   \
+      case 4:                                  \
+        (l1) = ((uint32_t)(*(--(c)))) << 24L;  \
+        OPENSSL_FALLTHROUGH;                   \
+      case 3:                                  \
+        (l1) |= ((uint32_t)(*(--(c)))) << 16L; \
+        OPENSSL_FALLTHROUGH;                   \
+      case 2:                                  \
+        (l1) |= ((uint32_t)(*(--(c)))) << 8L;  \
+        OPENSSL_FALLTHROUGH;                   \
+      case 1:                                  \
+        (l1) |= ((uint32_t)(*(--(c))));        \
+    }                                          \
+  } while (0)
 
-  return memmove(dst, src, n);
-}
+// NOTE - c is not incremented as per l2c
+#define l2cn(l1, l2, c, n)                                \
+  do {                                                    \
+    (c) += (n);                                           \
+    switch (n) {                                          \
+      case 8:                                             \
+        *(--(c)) = (unsigned char)(((l2) >> 24L) & 0xff); \
+        OPENSSL_FALLTHROUGH;                              \
+      case 7:                                             \
+        *(--(c)) = (unsigned char)(((l2) >> 16L) & 0xff); \
+        OPENSSL_FALLTHROUGH;                              \
+      case 6:                                             \
+        *(--(c)) = (unsigned char)(((l2) >> 8L) & 0xff);  \
+        OPENSSL_FALLTHROUGH;                              \
+      case 5:                                             \
+        *(--(c)) = (unsigned char)(((l2)) & 0xff);        \
+        OPENSSL_FALLTHROUGH;                              \
+      case 4:                                             \
+        *(--(c)) = (unsigned char)(((l1) >> 24L) & 0xff); \
+        OPENSSL_FALLTHROUGH;                              \
+      case 3:                                             \
+        *(--(c)) = (unsigned char)(((l1) >> 16L) & 0xff); \
+        OPENSSL_FALLTHROUGH;                              \
+      case 2:                                             \
+        *(--(c)) = (unsigned char)(((l1) >> 8L) & 0xff);  \
+        OPENSSL_FALLTHROUGH;                              \
+      case 1:                                             \
+        *(--(c)) = (unsigned char)(((l1)) & 0xff);        \
+    }                                                     \
+  } while (0)
 
-static inline void *OPENSSL_memset(void *dst, int c, size_t n) {
-  if (n == 0) {
-    return dst;
-  }
+/* IP and FP
+ * The problem is more of a geometric problem that random bit fiddling.
+ 0  1  2  3  4  5  6  7      62 54 46 38 30 22 14  6
+ 8  9 10 11 12 13 14 15      60 52 44 36 28 20 12  4
+16 17 18 19 20 21 22 23      58 50 42 34 26 18 10  2
+24 25 26 27 28 29 30 31  to  56 48 40 32 24 16  8  0
 
-  return memset(dst, c, n);
-}
+32 33 34 35 36 37 38 39      63 55 47 39 31 23 15  7
+40 41 42 43 44 45 46 47      61 53 45 37 29 21 13  5
+48 49 50 51 52 53 54 55      59 51 43 35 27 19 11  3
+56 57 58 59 60 61 62 63      57 49 41 33 25 17  9  1
 
-#if defined(BORINGSSL_FIPS)
-// BORINGSSL_FIPS_abort is called when a FIPS power-on or continuous test
-// fails. It prevents any further cryptographic operations by the current
-// process.
-void BORINGSSL_FIPS_abort(void) __attribute__((noreturn));
-#endif
+The output has been subject to swaps of the form
+0 1 -> 3 1 but the odd and even bits have been put into
+2 3    2 0
+different words.  The main trick is to remember that
+t=((l>>size)^r)&(mask);
+r^=t;
+l^=(t<<size);
+can be used to swap and move bits between words.
+
+So l =  0  1  2  3  r = 16 17 18 19
+        4  5  6  7      20 21 22 23
+        8  9 10 11      24 25 26 27
+       12 13 14 15      28 29 30 31
+becomes (for size == 2 and mask == 0x3333)
+   t =   2^16  3^17 -- --   l =  0  1 16 17  r =  2  3 18 19
+         6^20  7^21 -- --        4  5 20 21       6  7 22 23
+        10^24 11^25 -- --        8  9 24 25      10 11 24 25
+        14^28 15^29 -- --       12 13 28 29      14 15 28 29
+
+Thanks for hints from Richard Outerbridge - he told me IP&FP
+could be done in 15 xor, 10 shifts and 5 ands.
+When I finally started to think of the problem in 2D
+I first got ~42 operations without xors.  When I remembered
+how to use xors :-) I got it to its final state.
+*/
+#define PERM_OP(a, b, t, n, m)          \
+  do {                                  \
+    (t) = ((((a) >> (n)) ^ (b)) & (m)); \
+    (b) ^= (t);                         \
+    (a) ^= ((t) << (n));                \
+  } while (0)
+
+#define IP(l, r)                        \
+  do {                                  \
+    uint32_t tt;                        \
+    PERM_OP(r, l, tt, 4, 0x0f0f0f0fL);  \
+    PERM_OP(l, r, tt, 16, 0x0000ffffL); \
+    PERM_OP(r, l, tt, 2, 0x33333333L);  \
+    PERM_OP(l, r, tt, 8, 0x00ff00ffL);  \
+    PERM_OP(r, l, tt, 1, 0x55555555L);  \
+  } while (0)
+
+#define FP(l, r)                        \
+  do {                                  \
+    uint32_t tt;                        \
+    PERM_OP(l, r, tt, 1, 0x55555555L);  \
+    PERM_OP(r, l, tt, 8, 0x00ff00ffL);  \
+    PERM_OP(l, r, tt, 2, 0x33333333L);  \
+    PERM_OP(r, l, tt, 16, 0x0000ffffL); \
+    PERM_OP(l, r, tt, 4, 0x0f0f0f0fL);  \
+  } while (0)
+
+#define LOAD_DATA(ks, R, S, u, t, E0, E1) \
+  do {                                    \
+    (u) = (R) ^ (ks)->subkeys[S][0];      \
+    (t) = (R) ^ (ks)->subkeys[S][1];      \
+  } while (0)
+
+#define D_ENCRYPT(ks, LL, R, S)                                                \
+  do {                                                                         \
+    LOAD_DATA(ks, R, S, u, t, E0, E1);                                         \
+    t = ROTATE(t, 4);                                                          \
+    (LL) ^=                                                                    \
+        DES_SPtrans[0][(u >> 2L) & 0x3f] ^ DES_SPtrans[2][(u >> 10L) & 0x3f] ^ \
+        DES_SPtrans[4][(u >> 18L) & 0x3f] ^                                    \
+        DES_SPtrans[6][(u >> 26L) & 0x3f] ^ DES_SPtrans[1][(t >> 2L) & 0x3f] ^ \
+        DES_SPtrans[3][(t >> 10L) & 0x3f] ^                                    \
+        DES_SPtrans[5][(t >> 18L) & 0x3f] ^ DES_SPtrans[7][(t >> 26L) & 0x3f]; \
+  } while (0)
+
+#define ITERATIONS 16
+#define HALF_ITERATIONS 8
+
+#define ROTATE(a, n) (((a) >> (n)) + ((a) << (32 - (n))))
+
 
 #if defined(__cplusplus)
 }  // extern C
 #endif
 
-#endif  // OPENSSL_HEADER_CRYPTO_INTERNAL_H
+#endif  // OPENSSL_HEADER_DES_INTERNAL_H

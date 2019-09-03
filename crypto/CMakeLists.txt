@@ -1,596 +1,530 @@
-cmake_minimum_required(VERSION 3.0)
+include_directories(../include)
 
-# Defer enabling C and CXX languages.
-project(BoringSSL NONE)
-
-if(WIN32)
-  # On Windows, prefer cl over gcc if both are available. By default most of
-  # the CMake generators prefer gcc, even on Windows.
-  set(CMAKE_GENERATOR_CC cl)
-endif()
-
-include(sources.cmake)
-
-enable_language(C)
-enable_language(CXX)
-
-# This is a dummy target which all other targets depend on (manually - see other
-# CMakeLists.txt files). This gives us a hook to add any targets which need to
-# run before all other targets.
-add_custom_target(global_target)
-
-if(ANDROID)
-  # Android-NDK CMake files reconfigure the path and so Go and Perl won't be
-  # found. However, ninja will still find them in $PATH if we just name them.
-  if(NOT PERL_EXECUTABLE)
-    set(PERL_EXECUTABLE "perl")
-  endif()
-  if(NOT GO_EXECUTABLE)
-    set(GO_EXECUTABLE "go")
-  endif()
-else()
-  find_package(Perl REQUIRED)
-  find_program(GO_EXECUTABLE go)
-endif()
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_CROSSCOMPILING)
-  find_package(PkgConfig QUIET)
-  if (PkgConfig_FOUND)
-    pkg_check_modules(LIBUNWIND libunwind-generic)
-    if(LIBUNWIND_FOUND)
-      add_definitions(-DBORINGSSL_HAVE_LIBUNWIND)
+if(NOT OPENSSL_NO_ASM)
+  if(UNIX)
+    if(${ARCH} STREQUAL "aarch64")
+      # The "armx" Perl scripts look for "64" in the style argument
+      # in order to decide whether to generate 32- or 64-bit asm.
+      if(APPLE)
+        set(PERLASM_STYLE ios64)
+      else()
+        set(PERLASM_STYLE linux64)
+      endif()
+    elseif(${ARCH} STREQUAL "arm")
+      if(APPLE)
+        set(PERLASM_STYLE ios32)
+      else()
+        set(PERLASM_STYLE linux32)
+      endif()
+    elseif(${ARCH} STREQUAL "ppc64le")
+      set(PERLASM_STYLE linux64le)
     else()
-      message("libunwind not found. Disabling unwind tests.")
+      if(${ARCH} STREQUAL "x86")
+        set(PERLASM_FLAGS "-fPIC -DOPENSSL_IA32_SSE2")
+      endif()
+      if(APPLE)
+        set(PERLASM_STYLE macosx)
+      else()
+        set(PERLASM_STYLE elf)
+      endif()
     endif()
-  else()
-    message("pkgconfig not found. Disabling unwind tests.")
-  endif()
-endif()
+    set(ASM_EXT S)
+    enable_language(ASM)
+    set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -Wa,--noexecstack")
 
-if(NOT GO_EXECUTABLE)
-  message(FATAL_ERROR "Could not find Go")
-endif()
+    # Clang's integerated assembler does not support debug symbols.
+    if(NOT CMAKE_ASM_COMPILER_ID MATCHES "Clang")
+      set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -Wa,-g")
+    endif()
 
-if(USE_CUSTOM_LIBCXX)
-  set(BORINGSSL_ALLOW_CXX_RUNTIME 1)
-endif()
-
-if(BORINGSSL_ALLOW_CXX_RUNTIME)
-  add_definitions(-DBORINGSSL_ALLOW_CXX_RUNTIME)
-endif()
-
-if(CMAKE_BUILD_TYPE STREQUAL "Release")
-  # Windows release builds don't set NDEBUG in NASM flags automatically.
-  set(CMAKE_ASM_NASM_FLAGS "${CMAKE_ASM_NASM_FLAGS} -DNDEBUG")
-endif()
-
-# Add a RelWithAsserts build configuration. It is the same as Release, except it
-# does not define NDEBUG, so asserts run.
-foreach(VAR CMAKE_C_FLAGS CMAKE_CXX_FLAGS CMAKE_ASM_FLAGS)
-  string(REGEX REPLACE "(^| )[/-]DNDEBUG( |$)" " " "${VAR}_RELWITHASSERTS"
-         "${${VAR}_RELEASE}")
-endforeach()
-
-if(BORINGSSL_PREFIX AND BORINGSSL_PREFIX_SYMBOLS)
-  add_definitions(-DBORINGSSL_PREFIX=${BORINGSSL_PREFIX})
-  # CMake automatically connects include_directories to the NASM command-line,
-  # but not add_definitions.
-  set(CMAKE_ASM_NASM_FLAGS "${CMAKE_ASM_NASM_FLAGS} -DBORINGSSL_PREFIX=${BORINGSSL_PREFIX}")
-
-  # Use "symbol_prefix_include" to store generated header files
-  include_directories(${CMAKE_CURRENT_BINARY_DIR}/symbol_prefix_include)
-  add_custom_command(
-    OUTPUT symbol_prefix_include/boringssl_prefix_symbols.h
-           symbol_prefix_include/boringssl_prefix_symbols_asm.h
-           symbol_prefix_include/boringssl_prefix_symbols_nasm.inc
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/symbol_prefix_include
-    COMMAND ${GO_EXECUTABLE} run ${CMAKE_CURRENT_SOURCE_DIR}/util/make_prefix_headers.go -out ${CMAKE_CURRENT_BINARY_DIR}/symbol_prefix_include ${BORINGSSL_PREFIX_SYMBOLS}
-    DEPENDS util/make_prefix_headers.go
-            ${CMAKE_BINARY_DIR}/${BORINGSSL_PREFIX_SYMBOLS})
-
-  # add_dependencies needs a target, not a file, so we add an intermediate
-  # target.
-  add_custom_target(
-    boringssl_prefix_symbols
-    DEPENDS symbol_prefix_include/boringssl_prefix_symbols.h
-            symbol_prefix_include/boringssl_prefix_symbols_asm.h
-            symbol_prefix_include/boringssl_prefix_symbols_nasm.inc)
-  add_dependencies(global_target boringssl_prefix_symbols)
-elseif(BORINGSSL_PREFIX OR BORINGSSL_PREFIX_SYMBOLS)
-  message(FATAL_ERROR "Must specify both or neither of BORINGSSL_PREFIX and BORINGSSL_PREFIX_SYMBOLS")
-endif()
-
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  set(CLANG 1)
-endif()
-
-if(CMAKE_COMPILER_IS_GNUCXX OR CLANG)
-  # Note clang-cl is odd and sets both CLANG and MSVC. We base our configuration
-  # primarily on our normal Clang one.
-  set(C_CXX_FLAGS "-Werror -Wformat=2 -Wsign-compare -Wmissing-field-initializers -Wwrite-strings")
-  if(MSVC)
-    # clang-cl sets different default warnings than clang. It also treats -Wall
-    # as -Weverything, to match MSVC. Instead -W3 is the alias for -Wall.
-    # See http://llvm.org/viewvc/llvm-project?view=revision&revision=319116
-    set(C_CXX_FLAGS "${C_CXX_FLAGS} -W3 -Wno-unused-parameter -fmsc-version=1900")
-    # googletest suppresses warning C4996 via a pragma, but clang-cl does not
-    # honor it. Suppress it here to compensate. See https://crbug.com/772117.
-    set(C_CXX_FLAGS "${C_CXX_FLAGS} -Wno-deprecated-declarations")
-  else()
-    set(C_CXX_FLAGS "${C_CXX_FLAGS} -Wall -ggdb -fvisibility=hidden -fno-common")
-  endif()
-
-  if(CLANG)
-    set(C_CXX_FLAGS "${C_CXX_FLAGS} -Wnewline-eof -fcolor-diagnostics")
-  else()
-    # GCC (at least 4.8.4) has a bug where it'll find unreachable free() calls
-    # and declare that the code is trying to free a stack pointer.
-    set(C_CXX_FLAGS "${C_CXX_FLAGS} -Wno-free-nonheap-object")
-  endif()
-
-  if(CLANG OR NOT "7.0.0" VERSION_GREATER CMAKE_C_COMPILER_VERSION)
-    set(C_CXX_FLAGS "${C_CXX_FLAGS} -Wimplicit-fallthrough")
-  endif()
-
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${C_CXX_FLAGS} -Wmissing-prototypes -Wold-style-definition -Wstrict-prototypes")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${C_CXX_FLAGS} -Wmissing-declarations")
-
-  if(NOT MSVC)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+    # CMake does not add -isysroot and -arch flags to assembly.
     if(APPLE)
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
+      if(CMAKE_OSX_SYSROOT)
+        set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -isysroot \"${CMAKE_OSX_SYSROOT}\"")
+      endif()
+      foreach(arch ${CMAKE_OSX_ARCHITECTURES})
+        set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -arch ${arch}")
+      endforeach()
     endif()
-    if(NOT BORINGSSL_ALLOW_CXX_RUNTIME)
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-exceptions -fno-rtti")
-    endif()
-  endif()
-
-  # In GCC, -Wmissing-declarations is the C++ spelling of -Wmissing-prototypes
-  # and using the wrong one is an error. In Clang, -Wmissing-prototypes is the
-  # spelling for both and -Wmissing-declarations is some other warning.
-  #
-  # https://gcc.gnu.org/onlinedocs/gcc-7.1.0/gcc/Warning-Options.html#Warning-Options
-  # https://clang.llvm.org/docs/DiagnosticsReference.html#wmissing-prototypes
-  # https://clang.llvm.org/docs/DiagnosticsReference.html#wmissing-declarations
-  if(CLANG)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wmissing-prototypes")
-  endif()
-
-  if(CMAKE_COMPILER_IS_GNUCXX AND "4.8" VERSION_GREATER CMAKE_C_COMPILER_VERSION)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-array-bounds")
-  endif()
-
-elseif(MSVC)
-  set(MSVC_DISABLED_WARNINGS_LIST
-      "C4061" # enumerator 'identifier' in switch of enum 'enumeration' is not
-              # explicitly handled by a case label
-              # Disable this because it flags even when there is a default.
-      "C4100" # 'exarg' : unreferenced formal parameter
-      "C4127" # conditional expression is constant
-      "C4200" # nonstandard extension used : zero-sized array in
-              # struct/union.
-      "C4204" # nonstandard extension used: non-constant aggregate initializer
-      "C4221" # nonstandard extension used : 'identifier' : cannot be
-              # initialized using address of automatic variable
-      "C4242" # 'function' : conversion from 'int' to 'uint8_t',
-              # possible loss of data
-      "C4244" # 'function' : conversion from 'int' to 'uint8_t',
-              # possible loss of data
-      "C4267" # conversion from 'size_t' to 'int', possible loss of data
-      "C4371" # layout of class may have changed from a previous version of the
-              # compiler due to better packing of member '...'
-      "C4388" # signed/unsigned mismatch
-      "C4296" # '>=' : expression is always true
-      "C4350" # behavior change: 'std::_Wrap_alloc...'
-      "C4365" # '=' : conversion from 'size_t' to 'int',
-              # signed/unsigned mismatch
-      "C4389" # '!=' : signed/unsigned mismatch
-      "C4464" # relative include path contains '..'
-      "C4510" # 'argument' : default constructor could not be generated
-      "C4512" # 'argument' : assignment operator could not be generated
-      "C4514" # 'function': unreferenced inline function has been removed
-      "C4548" # expression before comma has no effect; expected expression with
-              # side-effect" caused by FD_* macros.
-      "C4610" # struct 'argument' can never be instantiated - user defined
-              # constructor required.
-      "C4623" # default constructor was implicitly defined as deleted
-      "C4625" # copy constructor could not be generated because a base class
-              # copy constructor is inaccessible or deleted
-      "C4626" # assignment operator could not be generated because a base class
-              # assignment operator is inaccessible or deleted
-      "C4628" # digraphs not supported with -Ze
-      "C4668" # 'symbol' is not defined as a preprocessor macro, replacing with
-              # '0' for 'directives'
-              # Disable this because GTest uses it everywhere.
-      "C4706" # assignment within conditional expression
-      "C4710" # 'function': function not inlined
-      "C4711" # function 'function' selected for inline expansion
-      "C4800" # 'int' : forcing value to bool 'true' or 'false'
-              # (performance warning)
-      "C4820" # 'bytes' bytes padding added after construct 'member_name'
-      "C5026" # move constructor was implicitly defined as deleted
-      "C5027" # move assignment operator was implicitly defined as deleted
-      "C5045" # Compiler will insert Spectre mitigation for memory load if
-              # /Qspectre switch specified
-      )
-  set(MSVC_LEVEL4_WARNINGS_LIST
-      # See https://connect.microsoft.com/VisualStudio/feedback/details/1217660/warning-c4265-when-using-functional-header
-      "C4265" # class has virtual functions, but destructor is not virtual
-      )
-  string(REPLACE "C" " -wd" MSVC_DISABLED_WARNINGS_STR
-                            ${MSVC_DISABLED_WARNINGS_LIST})
-  string(REPLACE "C" " -w4" MSVC_LEVEL4_WARNINGS_STR
-                            ${MSVC_LEVEL4_WARNINGS_LIST})
-  set(CMAKE_C_FLAGS   "-utf-8 -Wall -WX ${MSVC_DISABLED_WARNINGS_STR} ${MSVC_LEVEL4_WARNINGS_STR}")
-  set(CMAKE_CXX_FLAGS "-utf-8 -Wall -WX ${MSVC_DISABLED_WARNINGS_STR} ${MSVC_LEVEL4_WARNINGS_STR}")
-endif()
-
-if(WIN32)
-  add_definitions(-D_HAS_EXCEPTIONS=0)
-  add_definitions(-DWIN32_LEAN_AND_MEAN)
-  add_definitions(-DNOMINMAX)
-  # Allow use of fopen.
-  add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-  # VS 2017 and higher supports STL-only warning suppressions. Manually add to
-  # C++ only to work around a CMake quoting bug when using NASM with the Visual
-  # Studio generator. This will be fixed in CMake 3.13.0. See
-  # https://gitlab.kitware.com/cmake/cmake/merge_requests/2179
-  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-D_STL_EXTRA_DISABLED_WARNINGS=4774\ 4987>)
-endif()
-
-if((CMAKE_COMPILER_IS_GNUCXX AND CMAKE_C_COMPILER_VERSION VERSION_GREATER "4.7.99") OR
-   CLANG)
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wshadow")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wshadow")
-endif()
-
-if(CMAKE_COMPILER_IS_GNUCXX)
-  if((CMAKE_C_COMPILER_VERSION VERSION_GREATER "4.8.99") OR CLANG)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11")
   else()
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99")
-  endif()
-endif()
-
-# pthread_rwlock_t requires a feature flag.
-if(NOT WIN32)
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_XOPEN_SOURCE=700")
-endif()
-
-if(FUZZ)
-  if(NOT CLANG)
-    message(FATAL_ERROR "You need to build with Clang for fuzzing to work")
-  endif()
-
-  if(CMAKE_C_COMPILER_VERSION VERSION_LESS "6.0.0")
-    message(FATAL_ERROR "You need Clang ≥ 6.0.0")
-  endif()
-
-  add_definitions(-DBORINGSSL_UNSAFE_DETERMINISTIC_MODE)
-  set(RUNNER_ARGS "-deterministic")
-
-  if(NOT NO_FUZZER_MODE)
-    add_definitions(-DBORINGSSL_UNSAFE_FUZZER_MODE)
-    set(RUNNER_ARGS ${RUNNER_ARGS} "-fuzzer" "-shim-config" "fuzzer_mode.json")
-  endif()
-
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address,fuzzer-no-link -fsanitize-coverage=edge,indirect-calls")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address,fuzzer-no-link -fsanitize-coverage=edge,indirect-calls")
-endif()
-
-add_definitions(-DBORINGSSL_IMPLEMENTATION)
-
-if(BUILD_SHARED_LIBS)
-  add_definitions(-DBORINGSSL_SHARED_LIBRARY)
-  # Enable position-independent code globally. This is needed because
-  # some library targets are OBJECT libraries.
-  set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
-endif()
-
-if(MSAN)
-  if(NOT CLANG)
-    message(FATAL_ERROR "Cannot enable MSAN unless using Clang")
-  endif()
-
-  if(ASAN)
-    message(FATAL_ERROR "ASAN and MSAN are mutually exclusive")
-  endif()
-
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=memory -fsanitize-memory-track-origins -fno-omit-frame-pointer")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=memory -fsanitize-memory-track-origins -fno-omit-frame-pointer")
-  set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -fsanitize=memory -fsanitize-memory-track-origins -fno-omit-frame-pointer")
-endif()
-
-if(ASAN)
-  if(NOT CLANG)
-    message(FATAL_ERROR "Cannot enable ASAN unless using Clang")
-  endif()
-
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -fsanitize-address-use-after-scope -fno-omit-frame-pointer")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fsanitize-address-use-after-scope -fno-omit-frame-pointer")
-endif()
-
-if(CFI)
-  if(NOT CLANG)
-    message(FATAL_ERROR "Cannot enable CFI unless using Clang")
-  endif()
-
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=cfi -fno-sanitize-trap=cfi -flto=thin")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=cfi -fno-sanitize-trap=cfi -flto=thin")
-  # We use Chromium's copy of clang, which requires -fuse-ld=lld if building
-  # with -flto. That, in turn, can't handle -ggdb.
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld")
-  string(REPLACE "-ggdb" "-g" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
-  string(REPLACE "-ggdb" "-g" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-  # -flto causes object files to contain LLVM bitcode. Mixing those with
-  # assembly output in the same static library breaks the linker.
-  set(OPENSSL_NO_ASM "1")
-endif()
-
-if(TSAN)
-  if(NOT CLANG)
-    message(FATAL_ERROR "Cannot enable TSAN unless using Clang")
-  endif()
-
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=thread")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=thread")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=thread")
-endif()
-
-if(UBSAN)
-  if(NOT CLANG)
-    message(FATAL_ERROR "Cannot enable UBSAN unless using Clang")
-  endif()
-
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=undefined")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=undefined")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=undefined")
-
-  if(NOT UBSAN_RECOVER)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fno-sanitize-recover=undefined")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-sanitize-recover=undefined")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fno-sanitize-recover=undefined")
-  endif()
-endif()
-
-if(GCOV)
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fprofile-arcs -ftest-coverage")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
-endif()
-
-if(FIPS)
-  add_definitions(-DBORINGSSL_FIPS)
-  if(FIPS_BREAK_TEST)
-    add_definitions("-DBORINGSSL_FIPS_BREAK_${FIPS_BREAK_TEST}=1")
-  endif()
-  # The FIPS integrity check does not work for ASan and MSan builds.
-  if(NOT ASAN AND NOT MSAN)
-    if(BUILD_SHARED_LIBS)
-      set(FIPS_SHARED "1")
+    if(${ARCH} STREQUAL "x86_64")
+      set(PERLASM_STYLE nasm)
     else()
-      set(FIPS_DELOCATE "1")
+      set(PERLASM_STYLE win32n)
+      set(PERLASM_FLAGS "-DOPENSSL_IA32_SSE2")
     endif()
+    set(CMAKE_ASM_NASM_FLAGS "${CMAKE_ASM_NASM_FLAGS} -gcv8")
+
+    # On Windows, we use the NASM output, specifically built with Yasm.
+    set(ASM_EXT asm)
+    enable_language(ASM_NASM)
   endif()
 endif()
 
-if(OPENSSL_SMALL)
-  add_definitions(-DOPENSSL_SMALL)
-endif()
-
-if(CONSTANT_TIME_VALIDATION)
-  add_definitions(-DBORINGSSL_CONSTANT_TIME_VALIDATION)
-  # Asserts will often test secret data.
-  add_definitions(-DNDEBUG)
-endif()
-
-function(go_executable dest package)
-  set(godeps "${CMAKE_SOURCE_DIR}/util/godeps.go")
-  if(${CMAKE_VERSION} VERSION_LESS "3.7" OR
-     NOT ${CMAKE_GENERATOR} STREQUAL "Ninja")
-    # The DEPFILE parameter to add_custom_command is new as of CMake 3.7 and
-    # only works with Ninja. Query the sources at configure time. Additionally,
-    # everything depends on go.mod. That affects what external packages to use.
-    execute_process(COMMAND ${GO_EXECUTABLE} run ${godeps} -format cmake
-                            -pkg ${package}
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                    OUTPUT_VARIABLE sources
-                    RESULT_VARIABLE godeps_result)
-    add_custom_command(OUTPUT ${dest}
-                       COMMAND ${GO_EXECUTABLE} build
-                               -o ${CMAKE_CURRENT_BINARY_DIR}/${dest} ${package}
-                       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                       DEPENDS ${sources} ${CMAKE_SOURCE_DIR}/go.mod)
-  else()
-    # Ninja expects the target in the depfile to match the output. This is a
-    # relative path from the build directory.
-    string(LENGTH "${CMAKE_BINARY_DIR}" root_dir_length)
-    math(EXPR root_dir_length "${root_dir_length} + 1")
-    string(SUBSTRING "${CMAKE_CURRENT_BINARY_DIR}" ${root_dir_length} -1 target)
-    set(target "${target}/${dest}")
-
-    set(depfile "${CMAKE_CURRENT_BINARY_DIR}/${dest}.d")
-    add_custom_command(OUTPUT ${dest}
-                       COMMAND ${GO_EXECUTABLE} build
-                               -o ${CMAKE_CURRENT_BINARY_DIR}/${dest} ${package}
-                       COMMAND ${GO_EXECUTABLE} run ${godeps} -format depfile
-                               -target ${target} -pkg ${package} -out ${depfile}
-                       WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                       DEPENDS ${godeps} ${CMAKE_SOURCE_DIR}/go.mod
-                       DEPFILE ${depfile})
+function(perlasm dest src)
+  get_filename_component(dir ${dest} DIRECTORY)
+  if ("${dir}" STREQUAL "")
+    set(dir ".")
   endif()
+
+  add_custom_command(
+    OUTPUT ${dest}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${dir}
+    COMMAND ${PERL_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/${src} ${PERLASM_STYLE} ${PERLASM_FLAGS} ${ARGN} ${dest}
+    DEPENDS
+    ${src}
+    ${PROJECT_SOURCE_DIR}/crypto/perlasm/arm-xlate.pl
+    ${PROJECT_SOURCE_DIR}/crypto/perlasm/ppc-xlate.pl
+    ${PROJECT_SOURCE_DIR}/crypto/perlasm/x86_64-xlate.pl
+    ${PROJECT_SOURCE_DIR}/crypto/perlasm/x86asm.pl
+    ${PROJECT_SOURCE_DIR}/crypto/perlasm/x86gas.pl
+    ${PROJECT_SOURCE_DIR}/crypto/perlasm/x86masm.pl
+    ${PROJECT_SOURCE_DIR}/crypto/perlasm/x86nasm.pl
+    WORKING_DIRECTORY .
+  )
 endfunction()
 
-# CMake's iOS support uses Apple's multiple-architecture toolchain. It takes an
-# architecture list from CMAKE_OSX_ARCHITECTURES, leaves CMAKE_SYSTEM_PROCESSOR
-# alone, and expects all architecture-specific logic to be conditioned within
-# the source files rather than the build. This does not work for our assembly
-# files, so we fix CMAKE_SYSTEM_PROCESSOR and only support single-architecture
-# builds.
-if(NOT OPENSSL_NO_ASM AND CMAKE_OSX_ARCHITECTURES)
-  list(LENGTH CMAKE_OSX_ARCHITECTURES NUM_ARCHES)
-  if(NOT ${NUM_ARCHES} EQUAL 1)
-    message(FATAL_ERROR "Universal binaries not supported.")
-  endif()
-  list(GET CMAKE_OSX_ARCHITECTURES 0 CMAKE_SYSTEM_PROCESSOR)
-endif()
+add_subdirectory(fipsmodule)
+add_subdirectory(test)
 
-if(OPENSSL_NO_ASM)
-  add_definitions(-DOPENSSL_NO_ASM)
-  set(ARCH "generic")
-elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
-  set(ARCH "x86_64")
-elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "amd64")
-  set(ARCH "x86_64")
-elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "AMD64")
-  # cmake reports AMD64 on Windows, but we might be building for 32-bit.
-  if(CMAKE_CL_64)
-    set(ARCH "x86_64")
-  else()
-    set(ARCH "x86")
-  endif()
-elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86")
-  set(ARCH "x86")
-elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "i386")
-  set(ARCH "x86")
-elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "i686")
-  set(ARCH "x86")
-elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "aarch64")
-  set(ARCH "aarch64")
-elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "arm64")
-  set(ARCH "aarch64")
-# Apple A12 Bionic chipset which is added in iPhone XS/XS Max/XR uses arm64e architecture.
-elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "arm64e")
-  set(ARCH "aarch64")
-elseif(${CMAKE_SYSTEM_PROCESSOR} MATCHES "^arm*")
-  set(ARCH "arm")
-elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "mips")
-  # Just to avoid the “unknown processor” error.
-  set(ARCH "generic")
-elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "ppc64le")
-  set(ARCH "ppc64le")
-elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "s390x")
-  set(ARCH "s390x")
-else()
-  message(FATAL_ERROR "Unknown processor:" ${CMAKE_SYSTEM_PROCESSOR})
-endif()
+if(FIPS_DELOCATE OR FIPS_SHARED)
+  SET_SOURCE_FILES_PROPERTIES(fipsmodule/bcm.o PROPERTIES EXTERNAL_OBJECT true)
+  SET_SOURCE_FILES_PROPERTIES(fipsmodule/bcm.o PROPERTIES GENERATED true)
 
-if(ANDROID AND NOT ANDROID_NDK_REVISION AND ${ARCH} STREQUAL "arm")
-  # The third-party Android-NDK CMake files somehow fail to set the -march flag
-  # for assembly files. Without this flag, the compiler believes that it's
-  # building for ARMv5.
-  set(CMAKE_ASM_FLAGS "-march=${CMAKE_SYSTEM_PROCESSOR} ${CMAKE_ASM_FLAGS}")
-endif()
+  set(
+    CRYPTO_FIPS_OBJECTS
 
-if(USE_CUSTOM_LIBCXX)
-  if(NOT CLANG)
-    message(FATAL_ERROR "USE_CUSTOM_LIBCXX only supported with Clang")
-  endif()
-
-  # CMAKE_CXX_FLAGS ends up in the linker flags as well, so use
-  # add_compile_options. There does not appear to be a way to set
-  # language-specific compile-only flags.
-  add_compile_options("-nostdinc++")
-  set(CMAKE_CXX_LINK_FLAGS "${CMAKE_CXX_LINK_FLAGS} -nostdlib++")
-  include_directories(
-    SYSTEM
-    util/bot/libcxx/include
-    util/bot/libcxxabi/include
+    fipsmodule/bcm.o
   )
-
-  # This is patterned after buildtools/third_party/libc++/BUILD.gn and
-  # buildtools/third_party/libc++abi/BUILD.gn in Chromium.
-
-  file(GLOB LIBCXX_SOURCES "util/bot/libcxx/src/*.cpp")
-  file(GLOB LIBCXXABI_SOURCES "util/bot/libcxxabi/src/*.cpp")
-
-  # This file is meant for exception-less builds.
-  list(REMOVE_ITEM LIBCXXABI_SOURCES "trunk/src/cxa_noexception.cpp")
-  # libc++ also defines new and delete.
-  list(REMOVE_ITEM LIBCXXABI_SOURCES "trunk/src/stdlib_new_delete.cpp")
-  if(TSAN)
-    # ThreadSanitizer tries to intercept these symbols. Skip them to avoid
-    # symbol conflicts.
-    list(REMOVE_ITEM LIBCXXABI_SOURCES "trunk/src/cxa_guard.cpp")
-  endif()
-
-  add_library(libcxxabi ${LIBCXXABI_SOURCES})
-  target_compile_definitions(
-    libcxxabi PRIVATE
-    -D_LIBCPP_ENABLE_CXX17_REMOVED_UNEXPECTED_FUNCTIONS
-  )
-  set_target_properties(libcxxabi PROPERTIES COMPILE_FLAGS "-Wno-missing-prototypes -Wno-implicit-fallthrough")
-
-  add_library(libcxx ${LIBCXX_SOURCES})
-  if(ASAN OR MSAN OR TSAN)
-    # Sanitizers try to intercept new and delete.
-    target_compile_definitions(
-      libcxx PRIVATE
-      -D_LIBCPP_DISABLE_NEW_DELETE_DEFINITIONS
-    )
-  endif()
-  target_compile_definitions(
-    libcxx PRIVATE
-    -D_LIBCPP_BUILDING_LIBRARY
-    -DLIBCXX_BUILDING_LIBCXXABI
-  )
-  target_link_libraries(libcxx libcxxabi)
 endif()
 
-# Add minimal googletest targets. The provided one has many side-effects, and
-# googletest has a very straightforward build.
-add_library(boringssl_gtest third_party/googletest/src/gtest-all.cc)
-target_include_directories(boringssl_gtest PRIVATE third_party/googletest)
+if(${ARCH} STREQUAL "arm")
+  set(
+    CRYPTO_ARCH_SOURCES
 
-include_directories(third_party/googletest/include)
+    chacha/chacha-armv4.${ASM_EXT}
+    curve25519/asm/x25519-asm-arm.S
+    poly1305/poly1305_arm_asm.S
+    test/trampoline-armv4.${ASM_EXT}
+  )
+endif()
 
-# Declare a dummy target to build all unit tests. Test targets should inject
-# themselves as dependencies next to the target definition.
-add_custom_target(all_tests)
+if(${ARCH} STREQUAL "aarch64")
+  set(
+    CRYPTO_ARCH_SOURCES
+
+    chacha/chacha-armv8.${ASM_EXT}
+    test/trampoline-armv8.${ASM_EXT}
+    third_party/sike/asm/fp-armv8.${ASM_EXT}
+  )
+endif()
+
+if(${ARCH} STREQUAL "x86")
+  set(
+    CRYPTO_ARCH_SOURCES
+
+    chacha/chacha-x86.${ASM_EXT}
+    test/trampoline-x86.${ASM_EXT}
+  )
+endif()
+
+if(${ARCH} STREQUAL "x86_64")
+  set(
+    CRYPTO_ARCH_SOURCES
+
+    chacha/chacha-x86_64.${ASM_EXT}
+    cipher_extra/aes128gcmsiv-x86_64.${ASM_EXT}
+    cipher_extra/chacha20_poly1305_x86_64.${ASM_EXT}
+    hrss/asm/poly_rq_mul.S
+    test/trampoline-x86_64.${ASM_EXT}
+    third_party/sike/asm/fp-x86_64.${ASM_EXT}
+  )
+endif()
+
+perlasm(chacha/chacha-armv4.${ASM_EXT} chacha/asm/chacha-armv4.pl)
+perlasm(chacha/chacha-armv8.${ASM_EXT} chacha/asm/chacha-armv8.pl)
+perlasm(chacha/chacha-x86.${ASM_EXT} chacha/asm/chacha-x86.pl)
+perlasm(chacha/chacha-x86_64.${ASM_EXT} chacha/asm/chacha-x86_64.pl)
+perlasm(cipher_extra/aes128gcmsiv-x86_64.${ASM_EXT} cipher_extra/asm/aes128gcmsiv-x86_64.pl)
+perlasm(cipher_extra/chacha20_poly1305_x86_64.${ASM_EXT} cipher_extra/asm/chacha20_poly1305_x86_64.pl)
+perlasm(third_party/sike/asm/fp-x86_64.${ASM_EXT} ../third_party/sike/asm/fp-x86_64.pl)
+perlasm(third_party/sike/asm/fp-armv8.${ASM_EXT} ../third_party/sike/asm/fp-armv8.pl)
+perlasm(test/trampoline-armv4.${ASM_EXT} test/asm/trampoline-armv4.pl)
+perlasm(test/trampoline-armv8.${ASM_EXT} test/asm/trampoline-armv8.pl)
+perlasm(test/trampoline-x86.${ASM_EXT} test/asm/trampoline-x86.pl)
+perlasm(test/trampoline-x86_64.${ASM_EXT} test/asm/trampoline-x86_64.pl)
 
 add_custom_command(
-  OUTPUT crypto_test_data.cc
-  COMMAND ${GO_EXECUTABLE} run util/embed_test_data.go ${CRYPTO_TEST_DATA} >
-  ${CMAKE_CURRENT_BINARY_DIR}/crypto_test_data.cc
-  DEPENDS util/embed_test_data.go ${CRYPTO_TEST_DATA}
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  OUTPUT err_data.c
+  COMMAND ${GO_EXECUTABLE} run err_data_generate.go > ${CMAKE_CURRENT_BINARY_DIR}/err_data.c
+  DEPENDS
+  err/err_data_generate.go
+  err/asn1.errordata
+  err/bio.errordata
+  err/bn.errordata
+  err/cipher.errordata
+  err/conf.errordata
+  err/dh.errordata
+  err/digest.errordata
+  err/dsa.errordata
+  err/ecdh.errordata
+  err/ecdsa.errordata
+  err/ec.errordata
+  err/engine.errordata
+  err/evp.errordata
+  err/hkdf.errordata
+  err/obj.errordata
+  err/pem.errordata
+  err/pkcs7.errordata
+  err/pkcs8.errordata
+  err/rsa.errordata
+  err/ssl.errordata
+  err/x509.errordata
+  err/x509v3.errordata
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/err
+)
 
-add_library(crypto_test_data OBJECT crypto_test_data.cc)
+add_library(
+  crypto
 
-add_subdirectory(crypto)
-add_subdirectory(ssl)
-add_subdirectory(ssl/test)
-add_subdirectory(fipstools)
-add_subdirectory(tool)
-add_subdirectory(decrepit)
+  asn1/a_bitstr.c
+  asn1/a_bool.c
+  asn1/a_d2i_fp.c
+  asn1/a_dup.c
+  asn1/a_enum.c
+  asn1/a_gentm.c
+  asn1/a_i2d_fp.c
+  asn1/a_int.c
+  asn1/a_mbstr.c
+  asn1/a_object.c
+  asn1/a_octet.c
+  asn1/a_print.c
+  asn1/a_strnid.c
+  asn1/a_time.c
+  asn1/a_type.c
+  asn1/a_utctm.c
+  asn1/a_utf8.c
+  asn1/asn1_lib.c
+  asn1/asn1_par.c
+  asn1/asn_pack.c
+  asn1/f_enum.c
+  asn1/f_int.c
+  asn1/f_string.c
+  asn1/tasn_dec.c
+  asn1/tasn_enc.c
+  asn1/tasn_fre.c
+  asn1/tasn_new.c
+  asn1/tasn_typ.c
+  asn1/tasn_utl.c
+  asn1/time_support.c
+  base64/base64.c
+  bio/bio.c
+  bio/bio_mem.c
+  bio/connect.c
+  bio/fd.c
+  bio/file.c
+  bio/hexdump.c
+  bio/pair.c
+  bio/printf.c
+  bio/socket.c
+  bio/socket_helper.c
+  bn_extra/bn_asn1.c
+  bn_extra/convert.c
+  buf/buf.c
+  bytestring/asn1_compat.c
+  bytestring/ber.c
+  bytestring/cbb.c
+  bytestring/cbs.c
+  bytestring/unicode.c
+  chacha/chacha.c
+  cipher_extra/cipher_extra.c
+  cipher_extra/derive_key.c
+  cipher_extra/e_aesccm.c
+  cipher_extra/e_aesctrhmac.c
+  cipher_extra/e_aesgcmsiv.c
+  cipher_extra/e_chacha20poly1305.c
+  cipher_extra/e_null.c
+  cipher_extra/e_rc2.c
+  cipher_extra/e_rc4.c
+  cipher_extra/e_tls.c
+  cipher_extra/tls_cbc.c
+  cmac/cmac.c
+  conf/conf.c
+  cpu-aarch64-fuchsia.c
+  cpu-aarch64-linux.c
+  cpu-arm-linux.c
+  cpu-arm.c
+  cpu-s390x.c
+  cpu-intel.c
+  cpu-ppc64le.c
+  crypto.c
+  curve25519/spake25519.c
+  dh/dh.c
+  dh/params.c
+  dh/check.c
+  dh/dh_asn1.c
+  digest_extra/digest_extra.c
+  dsa/dsa.c
+  dsa/dsa_asn1.c
+  ecdh_extra/ecdh_extra.c
+  ecdsa_extra/ecdsa_asn1.c
+  ec_extra/ec_asn1.c
+  err/err.c
+  err_data.c
+  engine/engine.c
+  evp/digestsign.c
+  evp/evp.c
+  evp/evp_asn1.c
+  evp/evp_ctx.c
+  evp/p_dsa_asn1.c
+  evp/p_ec.c
+  evp/p_ec_asn1.c
+  evp/p_ed25519.c
+  evp/p_ed25519_asn1.c
+  evp/p_rsa.c
+  evp/p_rsa_asn1.c
+  evp/pbkdf.c
+  evp/print.c
+  evp/scrypt.c
+  evp/sign.c
+  ex_data.c
+  hkdf/hkdf.c
+  hrss/hrss.c
+  lhash/lhash.c
+  mem.c
+  obj/obj.c
+  obj/obj_xref.c
+  pem/pem_all.c
+  pem/pem_info.c
+  pem/pem_lib.c
+  pem/pem_oth.c
+  pem/pem_pk8.c
+  pem/pem_pkey.c
+  pem/pem_x509.c
+  pem/pem_xaux.c
+  pkcs7/pkcs7.c
+  pkcs7/pkcs7_x509.c
+  pkcs8/pkcs8.c
+  pkcs8/pkcs8_x509.c
+  pkcs8/p5_pbev2.c
+  poly1305/poly1305.c
+  poly1305/poly1305_arm.c
+  poly1305/poly1305_vec.c
+  pool/pool.c
+  rand_extra/deterministic.c
+  rand_extra/forkunsafe.c
+  rand_extra/fuchsia.c
+  rand_extra/rand_extra.c
+  rand_extra/windows.c
+  rc4/rc4.c
+  refcount_c11.c
+  refcount_lock.c
+  rsa_extra/rsa_asn1.c
+  rsa_extra/rsa_print.c
+  stack/stack.c
+  thread.c
+  thread_none.c
+  thread_pthread.c
+  thread_win.c
+  x509/a_digest.c
+  x509/a_sign.c
+  x509/a_strex.c
+  x509/a_verify.c
+  x509/algorithm.c
+  x509/asn1_gen.c
+  x509/by_dir.c
+  x509/by_file.c
+  x509/i2d_pr.c
+  x509/rsa_pss.c
+  x509/t_crl.c
+  x509/t_req.c
+  x509/t_x509.c
+  x509/t_x509a.c
+  x509/x509.c
+  x509/x509_att.c
+  x509/x509_cmp.c
+  x509/x509_d2.c
+  x509/x509_def.c
+  x509/x509_ext.c
+  x509/x509_lu.c
+  x509/x509_obj.c
+  x509/x509_r2x.c
+  x509/x509_req.c
+  x509/x509_set.c
+  x509/x509_trs.c
+  x509/x509_txt.c
+  x509/x509_v3.c
+  x509/x509_vfy.c
+  x509/x509_vpm.c
+  x509/x509cset.c
+  x509/x509name.c
+  x509/x509rset.c
+  x509/x509spki.c
+  x509/x_algor.c
+  x509/x_all.c
+  x509/x_attrib.c
+  x509/x_crl.c
+  x509/x_exten.c
+  x509/x_info.c
+  x509/x_name.c
+  x509/x_pkey.c
+  x509/x_pubkey.c
+  x509/x_req.c
+  x509/x_sig.c
+  x509/x_spki.c
+  x509/x_val.c
+  x509/x_x509.c
+  x509/x_x509a.c
+  x509v3/pcy_cache.c
+  x509v3/pcy_data.c
+  x509v3/pcy_lib.c
+  x509v3/pcy_map.c
+  x509v3/pcy_node.c
+  x509v3/pcy_tree.c
+  x509v3/v3_akey.c
+  x509v3/v3_akeya.c
+  x509v3/v3_alt.c
+  x509v3/v3_bcons.c
+  x509v3/v3_bitst.c
+  x509v3/v3_conf.c
+  x509v3/v3_cpols.c
+  x509v3/v3_crld.c
+  x509v3/v3_enum.c
+  x509v3/v3_extku.c
+  x509v3/v3_genn.c
+  x509v3/v3_ia5.c
+  x509v3/v3_info.c
+  x509v3/v3_int.c
+  x509v3/v3_lib.c
+  x509v3/v3_ncons.c
+  x509v3/v3_ocsp.c
+  x509v3/v3_pci.c
+  x509v3/v3_pcia.c
+  x509v3/v3_pcons.c
+  x509v3/v3_pku.c
+  x509v3/v3_pmaps.c
+  x509v3/v3_prn.c
+  x509v3/v3_purp.c
+  x509v3/v3_skey.c
+  x509v3/v3_sxnet.c
+  x509v3/v3_utl.c
+  ../third_party/fiat/curve25519.c
+  ../third_party/sike/fpx.c
+  ../third_party/sike/isogeny.c
+  ../third_party/sike/P503.c
+  ../third_party/sike/sike.c
+  ../third_party/sike/asm/fp_generic.c
 
-if(FUZZ)
-  if(LIBFUZZER_FROM_DEPS)
-    file(GLOB LIBFUZZER_SOURCES "util/bot/libFuzzer/*.cpp")
-    add_library(Fuzzer STATIC ${LIBFUZZER_SOURCES})
-    # libFuzzer does not pass our aggressive warnings. It also must be built
-    # without -fsanitize-coverage options or clang crashes.
-    set_target_properties(Fuzzer PROPERTIES COMPILE_FLAGS "-Wno-shadow -Wno-format-nonliteral -Wno-missing-prototypes -fsanitize-coverage=0")
-  endif()
+  $<TARGET_OBJECTS:fipsmodule>
 
-  add_subdirectory(fuzz)
+  ${CRYPTO_ARCH_SOURCES}
+  ${CRYPTO_FIPS_OBJECTS}
+)
+
+if(FIPS_SHARED)
+  # Rewrite libcrypto.so to inject the correct module hash value. This assumes
+  # UNIX-style library naming, but we only support FIPS mode on Linux anyway.
+  add_custom_command(
+    TARGET crypto POST_BUILD
+    COMMAND ${GO_EXECUTABLE} run
+    ${CMAKE_CURRENT_SOURCE_DIR}/../util/fipstools/inject_hash/inject_hash.go
+    -o libcrypto.so -in-object libcrypto.so
+    # The DEPENDS argument to a POST_BUILD rule appears to be ignored. Thus
+    # go_executable isn't used (as it doesn't get built), but we list this
+    # dependency anyway in case it starts working in some CMake version.
+    DEPENDS ../util/fipstools/inject_hash/inject_hash.go
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  )
 endif()
 
-if(NOT ${CMAKE_VERSION} VERSION_LESS "3.2")
-  # USES_TERMINAL is only available in CMake 3.2 or later.
-  set(MAYBE_USES_TERMINAL USES_TERMINAL)
+add_dependencies(crypto global_target)
+
+if(FIPS_DELOCATE OR FIPS_SHARED)
+  add_dependencies(crypto bcm_o_target)
 endif()
 
-if(UNIX AND NOT APPLE AND NOT ANDROID)
-  set(HANDSHAKER_ARGS "-handshaker-path" $<TARGET_FILE:handshaker>)
+SET_TARGET_PROPERTIES(crypto PROPERTIES LINKER_LANGUAGE C)
+
+if(NOT MSVC AND NOT ANDROID)
+  target_link_libraries(crypto pthread)
 endif()
 
-add_custom_target(
-    run_tests
-    COMMAND ${GO_EXECUTABLE} run util/all_tests.go -build-dir
-            ${CMAKE_BINARY_DIR}
-    COMMAND cd ssl/test/runner &&
-            ${GO_EXECUTABLE} test -shim-path $<TARGET_FILE:bssl_shim>
-              ${HANDSHAKER_ARGS} ${RUNNER_ARGS}
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    DEPENDS all_tests bssl_shim handshaker
-    ${MAYBE_USES_TERMINAL})
+# Every target depends on crypto, so we add libcxx as a dependency here to
+# simplify injecting it everywhere.
+if(USE_CUSTOM_LIBCXX)
+  target_link_libraries(crypto libcxx)
+endif()
+
+add_executable(
+  crypto_test
+
+  abi_self_test.cc
+  asn1/asn1_test.cc
+  base64/base64_test.cc
+  buf/buf_test.cc
+  bio/bio_test.cc
+  bytestring/bytestring_test.cc
+  chacha/chacha_test.cc
+  cipher_extra/aead_test.cc
+  cipher_extra/cipher_test.cc
+  cmac/cmac_test.cc
+  compiler_test.cc
+  constant_time_test.cc
+  cpu-arm-linux_test.cc
+  curve25519/ed25519_test.cc
+  curve25519/spake25519_test.cc
+  curve25519/x25519_test.cc
+  ecdh_extra/ecdh_test.cc
+  dh/dh_test.cc
+  digest_extra/digest_test.cc
+  dsa/dsa_test.cc
+  err/err_test.cc
+  evp/evp_extra_test.cc
+  evp/evp_test.cc
+  evp/pbkdf_test.cc
+  evp/scrypt_test.cc
+  fipsmodule/aes/aes_test.cc
+  fipsmodule/bn/bn_test.cc
+  fipsmodule/ec/ec_test.cc
+  fipsmodule/ec/p256-x86_64_test.cc
+  fipsmodule/ecdsa/ecdsa_test.cc
+  fipsmodule/md5/md5_test.cc
+  fipsmodule/modes/gcm_test.cc
+  fipsmodule/rand/ctrdrbg_test.cc
+  fipsmodule/sha/sha_test.cc
+  hkdf/hkdf_test.cc
+  hmac_extra/hmac_test.cc
+  hrss/hrss_test.cc
+  impl_dispatch_test.cc
+  lhash/lhash_test.cc
+  obj/obj_test.cc
+  pem/pem_test.cc
+  pkcs7/pkcs7_test.cc
+  pkcs8/pkcs8_test.cc
+  pkcs8/pkcs12_test.cc
+  poly1305/poly1305_test.cc
+  pool/pool_test.cc
+  rand_extra/rand_test.cc
+  refcount_test.cc
+  rsa_extra/rsa_test.cc
+  self_test.cc
+  stack/stack_test.cc
+  test/file_test_gtest.cc
+  thread_test.cc
+  x509/x509_test.cc
+  x509/x509_time_test.cc
+  x509v3/tab_test.cc
+  x509v3/v3name_test.cc
+  ../third_party/sike/sike_test.cc
+
+  $<TARGET_OBJECTS:crypto_test_data>
+  $<TARGET_OBJECTS:boringssl_gtest_main>
+)
+
+add_dependencies(crypto_test global_target)
+
+target_link_libraries(crypto_test test_support_lib boringssl_gtest crypto)
+if(WIN32)
+  target_link_libraries(crypto_test ws2_32)
+endif()
+add_dependencies(all_tests crypto_test)

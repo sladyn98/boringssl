@@ -17,9 +17,30 @@
 
 #include <openssl/base.h>
 
+#if !defined(OPENSSL_NO_ASM)
+
 #if defined(__cplusplus)
 extern "C" {
 #endif
+
+#if !defined(OPENSSL_NO_ASM)
+
+#if defined(OPENSSL_S390X)
+#define HWSHA
+
+OPENSSL_INLINE int hwsha_capable(void) {
+  return is_s390x_capable();
+}
+
+#endif
+#endif
+#if defined(HWSHA)
+void sha512_block_data_order(uint64_t *state, const uint8_t *in,
+                             size_t num_blocks);
+                             
+void sha256_block_data_order(uint32_t *state, const uint8_t *in,
+                             size_t num_blocks);
+#else
 
 
 #if !defined(OPENSSL_NO_ASM)

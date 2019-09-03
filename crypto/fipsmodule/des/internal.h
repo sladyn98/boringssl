@@ -57,7 +57,8 @@
 #ifndef OPENSSL_HEADER_DES_INTERNAL_H
 #define OPENSSL_HEADER_DES_INTERNAL_H
 
-#include <openssl/base.h>
+#include <openssl/des.h>
+#include <openssl/cpu.h>
 #include "../../internal.h"
 
 #if defined(__cplusplus)
@@ -66,27 +67,29 @@ extern "C" {
 
 #if !defined(OPENSSL_NO_ASM)
 
-#if defined(OPENSSL_S390X)
-#define HWDES
+# if defined(OPENSSL_S390X)
+# define HWDES
 
 OPENSSL_INLINE int hwdes_capable(void) {
-  return is_s390x_capable();
+  return CRYPTO_is_s390x_capable();
 }
 
-#endif
-#endif
+# endif // S390X
+
+#endif // NO_ASM
+
 #if defined(HWDES)
 
 int des_hw_set_encrypt_key(const uint8_t *user_key, const int bits,
-                           DES_KEY *key);
+                           DES_cblock *key);
 int des_hw_set_decrypt_key(const uint8_t *user_key, const int bits,
-                           DES_KEY *key);
-void des_hw_encrypt(const uint8_t *in, uint8_t *out, const DES_KEY *key);
-void des_hw_decrypt(const uint8_t *in, uint8_t *out, const DES_KEY *key);
+                           DES_cblock *key);
+void des_hw_encrypt(const uint8_t *in, uint8_t *out, const DES_cblock *key);
+void des_hw_decrypt(const uint8_t *in, uint8_t *out, const DES_cblock *key);
 void des_hw_cbc_encrypt(const uint8_t *in, uint8_t *out, size_t length,
-                        const DES_KEY *key, uint8_t *ivec, const int enc);
+                        const DES_cblock *key, uint8_t *ivec, const int enc);
 void des_hw_ctr32_encrypt_blocks(const uint8_t *in, uint8_t *out, size_t len,
-                                 const DES_KEY *key, const uint8_t ivec[16]);
+                                 const DES_cblock *key, const uint8_t ivec[16]);
 
 #else
 
@@ -95,33 +98,33 @@ void des_hw_ctr32_encrypt_blocks(const uint8_t *in, uint8_t *out, size_t len,
 OPENSSL_INLINE int hwdes_capable(void) { return 0; }
 
 OPENSSL_INLINE int des_hw_set_encrypt_key(const uint8_t *user_key, int bits,
-                                          DES_KEY *key) {
+                                          DES_cblock *key) {
   abort();
 }
 
 OPENSSL_INLINE int des_hw_set_decrypt_key(const uint8_t *user_key, int bits,
-                                          DES_KEY *key) {
+                                          DES_cblock *key) {
   abort();
 }
 
 OPENSSL_INLINE void des_hw_encrypt(const uint8_t *in, uint8_t *out,
-                                   const DES_KEY *key) {
+                                   const DES_cblock *key) {
   abort();
 }
 
 OPENSSL_INLINE void des_hw_decrypt(const uint8_t *in, uint8_t *out,
-                                   const DES_KEY *key) {
+                                   const DES_cblock *key) {
   abort();
 }
 
 OPENSSL_INLINE void des_hw_cbc_encrypt(const uint8_t *in, uint8_t *out,
-                                       size_t length, const DES_KEY *key,
+                                       size_t length, const DES_cblock *key,
                                        uint8_t *ivec, int enc) {
   abort();
 }
 
 OPENSSL_INLINE void des_hw_ctr32_encrypt_blocks(const uint8_t *in, uint8_t *out,
-                                                size_t len, const DES_KEY *key,
+                                                size_t len, const DES_cblock *key,
                                                 const uint8_t ivec[16]) {
   abort();
 }

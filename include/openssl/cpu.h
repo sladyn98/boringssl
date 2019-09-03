@@ -190,6 +190,14 @@ extern unsigned long OPENSSL_ppc64le_hwcap2;
 
 #endif  // OPENSSL_PPC64LE
 
+#if defined(OPENSSL_S390X)
+
+// CRYPTO_is_s390x_capable returns true iff the current CPU supports
+// the hardware crypto facility
+int CRYPTO_is_s390x_capable(void);
+
+#endif  // OPENSSL_S390X
+
 #if !defined(NDEBUG) && !defined(BORINGSSL_FIPS)
 // Runtime CPU dispatch testing support
 

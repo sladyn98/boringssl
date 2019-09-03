@@ -254,6 +254,7 @@ add_library(
   cpu-aarch64-linux.c
   cpu-arm-linux.c
   cpu-arm.c
+  cpu-s390x.c
   cpu-intel.c
   cpu-ppc64le.c
   crypto.c

@@ -17,8 +17,6 @@
 
 #include <openssl/base.h>
 
-#if !defined(OPENSSL_NO_ASM)
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -70,3 +68,4 @@ void sha512_block_data_order(uint64_t *state, const uint8_t *in,
 #endif
 
 #endif  // OPENSSL_HEADER_SHA_INTERNAL_H
+#endif

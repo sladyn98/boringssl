@@ -11,7 +11,7 @@ static void *handle = NULL;
 
 int CRYPTO_is_s390x_capable()
 {
-    handle = dlopen("filename",RTLD_NOW);
+    handle = dlopen("libica.so",RTLD_NOW);
      if (!handle) {
         fprintf(stderr, "%s\n", dlerror());
         exit(EXIT_FAILURE);
@@ -94,24 +94,43 @@ void aes_hw_decrypt(const uint8_t *in, uint8_t *out, const AES_KEY *key) {
     (void) ica_aes_cbc(in_data, out_data, data_length, aeskey->rd_key, key_length, ICA_DECRYPT);
 }
 
-// void aes_hw_ctr32_encrypt_blocks(const uint8_t *in, uint8_t *out, size_t len,
-//                                  const AES_KEY *key, const uint8_t ivec[16]) {
+void sha256_block_data_order(uint64_t *state, const uint8_t *in,
+                             size_t num_blocks) {
 
-//     static char *epName = "ica_aes_ctr";
-// 	static int (*unsigned int ica_aes_ctr(const unsigned char *, unsigned char *,
-// 			 unsigned long, unsigned char *, unsigned int, unsigned char *, unsigned int,
-// 			 unsigned int); = NULL;
+    static char *epName = "ica_sha256";
+	static int (*ica_sha256)(unsigned int,
+			unsigned int , unsigned char *, sha256_context_t *,
+			unsigned char *) = NULL;
 
-//  	if (ica_aes_ctr == NULL) {
-//         handle = dlopen("filename",RTLD_NOW);
-//         if (!handle) {
-//             fprintf(stderr, "%s\n", dlerror());
-//             exit(EXIT_FAILURE);
-//         }
-// 		ica_aes_ctr = dlsym(handle, epName);
-// 	}
+ 	if (ica_sha256 == NULL) {
+        handle = dlopen("libica.so",RTLD_NOW);
+        if (!handle) {
+            fprintf(stderr, "%s\n", dlerror());
+            exit(EXIT_FAILURE);
+        }
+		ica_sha256 = dlsym(handle, epName);
+	}
+    (void) ica_sha256(data, len, in, ctx ,out);
 
-//     (void) ica_aes_ctr(in_data, out_data,  data_length,aes->rd_key, key_length, *ctr, 16,ICA_ENCRYPT);
+}
 
-// }
+void sha512_block_data_order(uint64_t *state, const uint8_t *in,
+                             size_t num_blocks) {
+
+    static char *epName = "ica_sha512";
+	static int (*ica_sha512)(unsigned int,
+			uint64_t ,unsigned char *, sha512_context_t *, unsigned char *) = NULL;
+
+ 	if (ica_sha512 == NULL) {
+        handle = dlopen("libica.so",RTLD_NOW);
+        if (!handle) {
+            fprintf(stderr, "%s\n", dlerror());
+            exit(EXIT_FAILURE);
+        }
+		ica_sha512 = dlsym(handle, epName);
+	}
+    (void) ica_sha512(data, len, in, ctx ,out);
+}
+
+
 #endif

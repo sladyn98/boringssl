@@ -94,7 +94,7 @@ void aes_hw_decrypt(const uint8_t *in, uint8_t *out, const AES_KEY *key) {
     (void) ica_aes_cbc(in_data, out_data, data_length, aeskey->rd_key, key_length, ICA_DECRYPT);
 }
 
-void sha256_block_data_order(uint64_t *state, const uint8_t *in,
+static void sha256_block_data_order(uint64_t *state, const uint8_t *in,
                              size_t num_blocks) {
 
     static char *epName = "ica_sha256";
@@ -114,7 +114,7 @@ void sha256_block_data_order(uint64_t *state, const uint8_t *in,
 
 }
 
-void sha512_block_data_order(uint64_t *state, const uint8_t *in,
+static void sha512_block_data_order(uint64_t *state, const uint8_t *in,
                              size_t num_blocks) {
 
     static char *epName = "ica_sha512";

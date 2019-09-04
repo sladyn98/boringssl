@@ -1,5 +1,9 @@
 # BoringSSL
 
+
+https://aussie-1.lf-dev.marist.edu:9443/job/omp-btls/badge/icon?style=plastic
+
+
 BoringSSL is a fork of OpenSSL that is designed to meet Google's needs.
 
 Although BoringSSL is an open source project, it is not intended for general

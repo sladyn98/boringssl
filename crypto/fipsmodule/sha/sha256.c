@@ -231,6 +231,11 @@ static void sha256_block_data_order(uint32_t *state, const uint8_t *data,
   uint32_t X[16];
   int i;
 
+  if (hwsha_capable()) {
+    sha256_hw_block_data_order(state, data, num)
+    return;
+  }
+
   while (num--) {
     a = state[0];
     b = state[1];

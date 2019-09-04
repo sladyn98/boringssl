@@ -16,8 +16,8 @@
 #define OPENSSL_HEADER_SHA_INTERNAL_H
 
 #include <openssl/base.h>
-
-#if !defined(OPENSSL_NO_ASM)
+#include <openssl/cpu.h>
+#include "internal.h"
 
 #if defined(__cplusplus)
 extern "C" {
@@ -29,31 +29,42 @@ extern "C" {
 #define HWSHA
 
 OPENSSL_INLINE int hwsha_capable(void) {
-  return is_s390x_capable();
+  return CRYPTO_is_s390x_capable();
 }
 
-#endif
-#endif
+#endif // OPENSSL_S390X
+#endif // OPENSSL_NO_ASM
+
 #if defined(HWSHA)
-void sha512_block_data_order(uint64_t *state, const uint8_t *in,
-                             size_t num_blocks);
+
+OPENSSL_INLINE void sha256_block_data_order(uint32_t *state, const uint8_t *in, size_t num_blocks) {
+}
+
+OPENSSL_INLINE void sha512_block_data_order(uint64_t *state, const uint8_t *in, size_t num_blocks) {
+}
+
+void SHA512_hw(const uint8_t *data, size_t len, uint8_t out[SHA512_DIGEST_LENGTH]);
                              
-void sha256_block_data_order(uint32_t *state, const uint8_t *in,
-                             size_t num_blocks);
+void SHA256_hw(const uint8_t *data, size_t len, uint8_t out[SHA256_DIGEST_LENGTH]);
+
 #else
 
+OPENSSL_INLINE int hwsha_capable(void) { return 0; }
 
-#if !defined(OPENSSL_NO_ASM)
+OPENSSL_INLINE void SHA512_hw(const uint8_t *data, size_t len, uint8_t out[SHA512_DIGEST_LENGTH]) {
+	abort();
+}
 
-#if defined(OPENSSL_X86) || defined(OPENSSL_X86_64) || defined(OPENSSL_ARM) || \
-    defined(OPENSSL_AARCH64) || defined(OPENSSL_PPC64LE)
-#define SHA1_ASM
+OPENSSL_INLINE void SHA256_hw(const uint8_t *data, size_t len, uint8_t out[SHA256_DIGEST_LENGTH]) {
+	abort();
+}
+
 void sha1_block_data_order(uint32_t *state, const uint8_t *in,
                            size_t num_blocks);
-#endif
+#endif // HWSHA
 
 #if defined(OPENSSL_X86) || defined(OPENSSL_X86_64) || defined(OPENSSL_ARM) || \
-    defined(OPENSSL_AARCH64)
+    defined(OPENSSL_AARCH64) || defined(OPENSSL_S390X)
 #define SHA256_ASM
 #define SHA512_ASM
 void sha256_block_data_order(uint32_t *state, const uint8_t *in,
@@ -61,9 +72,6 @@ void sha256_block_data_order(uint32_t *state, const uint8_t *in,
 void sha512_block_data_order(uint64_t *state, const uint8_t *in,
                              size_t num_blocks);
 #endif
-
-#endif  // OPENSSL_NO_ASM
-
 
 #if defined(__cplusplus)
 }  // extern "C"

@@ -57,7 +57,10 @@
 void AES_ctr128_encrypt(const uint8_t *in, uint8_t *out, size_t len,
                         const AES_KEY *key, uint8_t ivec[AES_BLOCK_SIZE],
                         uint8_t ecount_buf[AES_BLOCK_SIZE], unsigned int *num) {
-  CRYPTO_ctr128_encrypt(in, out, len, key, ivec, ecount_buf, num, AES_encrypt);
+  if (hwaes_ctr_capable())
+    aes_hw_ctr128_encrypt(in, out, len, key, ivec, ecount_buf, num);
+  else
+    CRYPTO_ctr128_encrypt(in, out, len, key, ivec, ecount_buf, num, AES_encrypt);
 }
 
 void AES_ecb_encrypt(const uint8_t *in, uint8_t *out, const AES_KEY *key,

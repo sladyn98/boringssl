@@ -446,7 +446,7 @@ endif()
 SET_TARGET_PROPERTIES(crypto PROPERTIES LINKER_LANGUAGE C)
 
 if(NOT MSVC AND NOT ANDROID)
-  target_link_libraries(crypto pthread)
+  target_link_libraries(crypto pthread dl)
 endif()
 
 # Every target depends on crypto, so we add libcxx as a dependency here to

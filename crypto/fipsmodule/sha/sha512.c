@@ -117,11 +117,15 @@ uint8_t *SHA384(const uint8_t *data, size_t len,
 
 uint8_t *SHA512(const uint8_t *data, size_t len,
                 uint8_t out[SHA512_DIGEST_LENGTH]) {
-  SHA512_CTX ctx;
-  SHA512_Init(&ctx);
-  SHA512_Update(&ctx, data, len);
-  SHA512_Final(out, &ctx);
-  OPENSSL_cleanse(&ctx, sizeof(ctx));
+  if (hwsha_capable()) 
+    SHA512_hw(data, len, out);
+  else {
+    SHA512_CTX ctx;
+    SHA512_Init(&ctx);
+    SHA512_Update(&ctx, data, len);
+    SHA512_Final(out, &ctx);
+    OPENSSL_cleanse(&ctx, sizeof(ctx));
+  }
   return out;
 }
 

@@ -64,6 +64,17 @@ OPENSSL_INLINE int vpaes_capable(void) { return CRYPTO_is_NEON_capable(); }
 OPENSSL_INLINE int hwaes_capable(void) {
   return CRYPTO_is_PPC64LE_vcrypto_capable();
 }
+#elif defined(OPENSSL_S390X)
+#define HWAES
+#define HWAES_CTR
+
+OPENSSL_INLINE int hwaes_capable(void) {
+  return CRYPTO_is_s390x_capable();
+}
+
+OPENSSL_INLINE int hwaes_ctr_capable(void) {
+  return CRYPTO_is_s390x_capable();
+}
 #endif
 
 #endif  // !NO_ASM
@@ -81,6 +92,24 @@ void aes_hw_cbc_encrypt(const uint8_t *in, uint8_t *out, size_t length,
                         const AES_KEY *key, uint8_t *ivec, const int enc);
 void aes_hw_ctr32_encrypt_blocks(const uint8_t *in, uint8_t *out, size_t len,
                                  const AES_KEY *key, const uint8_t ivec[16]);
+
+# if defined(HWAES_CTR)
+
+void aes_hw_ctr128_encrypt(const uint8_t *in, uint8_t *out, size_t len,
+			   const AES_KEY *key, uint8_t ivec[AES_BLOCK_SIZE],
+			   uint8_t ecount_buf[AES_BLOCK_SIZE], unsigned int *num);
+
+# else
+
+OPENSSL_INLINE int hwaes_ctr_capable(void) { return 0; }
+
+void aes_hw_ctr128_encrypt(const uint8_t *in, uint8_t *out, size_t len,
+                          const AES_KEY *key, uint8_t ivec[AES_BLOCK_SIZE],
+                          uint8_t ecount_buf[AES_BLOCK_SIZE], unsigned int *num) {
+  abort();
+}
+
+# endif
 
 #else
 

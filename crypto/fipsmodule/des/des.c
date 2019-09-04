@@ -60,6 +60,17 @@
 
 #include "internal.h"
 
+int des_hw_set_encrypt_key(const uint8_t *user_key, const int bits,
+                          DES_KEY *key);
+int des_hw_set_decrypt_key(const uint8_t *user_key, const int bits,
+                          DES_KEY *key);
+void des_hw_encrypt(const uint8_t *in, uint8_t *out, const DES_KEY *key);
+void des_hw_decrypt(const uint8_t *in, uint8_t *out, const DES_KEY *key);
+void des_hw_cbc_encrypt(const uint8_t *in, uint8_t *out, size_t length,
+                       const DES_KEY *key, uint8_t *ivec, const int enc);
+void des_hw_ctr32_encrypt_blocks(const uint8_t *in, uint8_t *out, size_t len,
+                                const DES_KEY *key, const uint8_t ivec[16]);
+
 
 static const uint32_t des_skb[8][64] = {
     {  // for C bits (numbered as per FIPS 46) 1 2 3 4 5 6

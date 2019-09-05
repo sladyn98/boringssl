@@ -3,6 +3,27 @@
 
 [![Build Status](https://aussie-1.lf-dev.marist.edu:9443/buildStatus/icon?job=omp-btls)](https://aussie-1.lf-dev.marist.edu:9443/job/omp-btls/)
 
+The jenkins build runs on the above url.
+The builds run every 5 hours.
+The commands used to build the project are:
+```
+mkdir build
+cd build
+cmake3 ..
+make
+```
+
+These commands can be run from the root directory.
+
+OMP-19
+
+This fork has been developed to run cryptographic libraries using hardware acceleration.
+
+Mentor:
+* [Neale](https://github.com/nealef)
+
+Student:
+* [Sladyn](https://github.com/sladyn98)
 BoringSSL is a fork of OpenSSL that is designed to meet Google's needs.
 
 Although BoringSSL is an open source project, it is not intended for general
